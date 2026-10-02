@@ -1,0 +1,412 @@
+/*
+ * B1 覆盖层页面样式（t57）。
+ *
+ * 独立性：这是**独立浏览器窗口**（kiosk），没有 DSH 的模块表与主题服务，所以
+ *   - 不引用任何 --dsw-alias-* 令牌、不依赖任何 @deepseek-ai/dsh-client-* 包；
+ *   - 深色 UI 全部自绘（颜色是页面自己的常量，见 overlay.js 的 PALETTE）。
+ * 坐标系：页面视口 = 屏幕（kiosk 全屏），所有 chrome 元素都用**视口绝对坐标**，
+ *   canvas 的位图尺寸 = 冻结帧尺寸，CSS 尺寸 = 视口尺寸（1:1 映射见 overlay.js）。
+ * 把手位置：8 个把手是选区框的**兄弟节点**（不是子节点）—— 从根上避开 H-01 那类
+ *   「绝对坐标写进子元素相对坐标」的二次偏移。
+ */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #f5f6f8;
+  font: 13px/1.4 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.layer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: block;
+}
+
+#base {
+  z-index: 1;
+}
+
+.mask {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 2;
+  display: none;
+}
+
+#ink {
+  z-index: 4;
+  pointer-events: none;
+}
+
+#selection {
+  position: fixed;
+  z-index: 3;
+  display: none;
+  border: 1px solid #4c8dff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.handle {
+  position: fixed;
+  z-index: 5;
+  width: 8px;
+  height: 8px;
+  display: none;
+  background: #4c8dff;
+  border: 1px solid #0b1220;
+  pointer-events: none;
+}
+
+/* 已放置标注的选中框（t70）：虚线区分于选区的实线框；角把手与选区把手同样是兄弟节点。 */
+#annotation-box {
+  position: fixed;
+  z-index: 5;
+  display: none;
+  border: 1px dashed #dbe4ff;
+  pointer-events: none;
+}
+
+.annot-handle {
+  position: fixed;
+  z-index: 6;
+  width: 8px;
+  height: 8px;
+  display: none;
+  border-radius: 2px;
+  background: #dbe4ff;
+  border: 1px solid #0b1220;
+  pointer-events: none;
+}
+
+#annotation-box[data-dragging="true"] {
+  cursor: move;
+}
+
+#cross-x,
+#cross-y {
+  position: fixed;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  display: none;
+}
+
+#badge {
+  position: fixed;
+  z-index: 6;
+  display: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(11, 18, 32, 0.85);
+  color: #dbe4ff;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#toolbar {
+  position: fixed;
+  z-index: 7;
+  display: none;
+  /* t66：两行是**结构**（两个 .row），不靠自动折行 —— 折点随机、长短不齐很难看。 */
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: max-content;
+  max-width: min(96vw, 1180px);
+  padding: 8px 10px;
+  border: 1px solid #26324a;
+  border-radius: 12px;
+  background: #101828;
+  color: #eef2ff;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 把右侧的「尺寸 / 动作」推到行尾，两行看起来是同一条面板。 */
+.grow {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+/* 条件分组（字号 / 粒度）用 hidden 属性显隐；.group 是 inline-flex，会盖掉 hidden 的默认样式。 */
+#toolbar [hidden] {
+  display: none !important;
+}
+
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: #26324a;
+}
+
+.label {
+  color: #93a4c4;
+  font-size: 12px;
+}
+
+.btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #1b2740;
+}
+
+.btn:focus-visible {
+  outline: 2px solid #4c8dff;
+  outline-offset: 1px;
+}
+
+.btn[aria-pressed="true"] {
+  background: #1d4ed8;
+  border-color: #4c8dff;
+  color: #ffffff;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn:disabled:hover {
+  background: transparent;
+}
+
+/* 图标按钮：可见内容只有图标，名字走 title 悬停提示（与 DSH 内覆盖层一致）。 */
+.btn.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+}
+
+/* 档位 chip（线宽 / 字号 / 粒度）。 */
+.btn.chip {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  line-height: 22px;
+}
+
+.btn.chip:hover {
+  background: #1b2740;
+}
+
+.btn.swatch {
+  width: 22px;
+  min-width: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #26324a;
+}
+
+.btn.swatch[aria-pressed="true"] {
+  border-color: #ffffff;
+}
+
+.btn.primary {
+  background: #1d4ed8;
+  border-color: #4c8dff;
+  color: #ffffff;
+  padding: 0 12px;
+}
+
+/* 主按钮同时也是图标按钮（插入对话 = ✓）：尺寸交给 .btn.icon，别被上面的 padding 撑宽。 */
+.btn.primary.icon {
+  padding: 0;
+}
+
+#hint,
+#notice {
+  color: #93a4c4;
+  font-size: 12px;
+}
+
+/* 第一行右侧的输出尺寸（与选区上方的徽标同源，原版也是这么放的）。 */
+#size-label {
+  color: #93a4c4;
+  white-space: nowrap;
+}
+
+#notice[data-kind="error"] {
+  color: #ff8f8f;
+}
+
+#notice[data-kind="info"] {
+  color: #9ecbff;
+}
+
+#editor {
+  position: fixed;
+  z-index: 8;
+  display: none;
+  min-width: 160px;
+  padding: 4px 6px;
+  border: 1px solid #4c8dff;
+  border-radius: 6px;
+  background: #0b1220;
+  color: #ffffff;
+  font: inherit;
+}
+
+/* ── 识别 / 翻译结果卡片（t75） ──────────────────────────────────────────────
+   与工具栏同一套深色自绘（独立窗口拿不到 DSH 主题令牌）。位置由 JS 算（选区下方或上方），
+   尺寸固定不随选区拉伸：卡片是"读文本"的地方，跟着选区变宽只会让行更长。
+   文本区可选中（body 上是 user-select:none）—— 用户的第一反应就是拿鼠标划一句话。 */
+#ocr-card {
+  position: fixed;
+  z-index: 9;
+  width: min(560px, 92vw);
+  max-height: min(56vh, 520px);
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid #26324a;
+  border-radius: 12px;
+  background: #101828;
+  color: #eef2ff;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  cursor: default;
+}
+
+#ocr-card[hidden] {
+  display: none;
+}
+
+.ocr-block + .ocr-block {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #26324a;
+}
+
+.ocr-block[hidden] {
+  display: none;
+}
+
+.ocr-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  /* 一行到底：标题/标签/按钮都不折行，只有中间的诊断信息可以被压缩（见 .ocr-meta）。
+     不这么钉的话，窄一点的卡片会把「目标 / Target」和「复制 / Copy」折成两行，
+     头部一下子变成四行高。 */
+  flex-wrap: nowrap;
+}
+
+.ocr-title,
+.ocr-lang,
+.ocr-head .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.ocr-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #dbe4ff;
+}
+
+/* 诊断信息（行数/引擎/耗时、provider/model）是**唯一**可以让位的：它可压缩、可省略号截断，
+   这样头部在窄卡片上也只占一行。 */
+.ocr-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #93a4c4;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ocr-meta[data-kind="error"] {
+  color: #ff8f8f;
+}
+
+.ocr-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#ocr-target-select {
+  height: 24px;
+  max-width: 150px;
+  padding: 0 4px;
+  border: 1px solid #26324a;
+  border-radius: 6px;
+  background: #0b1220;
+  color: #eef2ff;
+  font: inherit;
+  font-size: 12px;
+}
+
+/* 文本块：等宽 + 保留换行（识别结果的行结构本身就是信息）；高度自适应但有上限，
+   超长就滚动 —— 卡片永远不许长到盖住整个选区。 */
+.ocr-text {
+  margin: 6px 0 0;
+  max-height: 22vh;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #0b1220;
+  color: #eef2ff;
+  font: 13px/1.5 "Consolas", "Microsoft YaHei", ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  cursor: text;
+}
+
+.ocr-text:empty::before {
+  content: attr(data-placeholder);
+  color: #93a4c4;
+}
+
+.ocr-text:focus-visible {
+  outline: 2px solid #4c8dff;
+  outline-offset: 1px;
+}
+
+/* 忙态：不遮住已有文本（识别/翻译是"再来一次"，不是"重来一遍"）。 */
+.ocr-block[data-busy="true"] .ocr-text {
+  opacity: 0.55;
+}

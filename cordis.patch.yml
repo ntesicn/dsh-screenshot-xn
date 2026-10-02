@@ -1,0 +1,21 @@
+# dsh-screenshot-xn bundle patch.
+#
+# One `insert` list, exactly one row: this bundle itself. A bundle patch must be
+# purely additive - never override, disable or reorder a row another bundle
+# owns, and never reuse an existing rowId. The row id stays stable so the
+# Plugin Manager keeps tracking this plugin across upgrades.
+#
+# 2026-09-30: renamed dsh-screenshot -> dsh-screenshot-xn (user request, to stand
+# apart from look-alike screenshot plugins). The row id changed with it, so the
+# active profile's `captureMode` override had to move to the new id as well.
+- insert:
+    - id: dsh-screenshot-xn
+      name: dsh-screenshot-xn
+      # All keys are optional; index.js falls back to the documented defaults.
+      # See README.md ("配置") for the recognized keys.
+      #
+      # `captureMode` is declared in the plugin's `Config` schema as a *volatile*
+      # field: DSH renders it in the settings / Plugin-Manager page and writes the
+      # choice into the ACTIVE PROFILE patch (not here). Editing it there applies
+      # live and survives a restart; the right-click menu writes the same value.
+      config: {}

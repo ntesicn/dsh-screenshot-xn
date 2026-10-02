@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DSH 截图 · 覆盖层 / Screenshot overlay</title>
+  <!--
+    静态资源走宿主的资产前缀（宿主 t56 的 OVERLAY_ASSET_PREFIX = /api/dsh-screenshot/overlay/asset/）：
+    页面 URL 是 …/overlay/page?token=…，如果写相对路径 `./overlay.css` 会被解析成
+    …/overlay/overlay.css —— 与宿主的资产前缀不一致（404）。这里写绝对路径，两侧字面一致。
+  -->
+  <link rel="stylesheet" href="/api/dsh-screenshot/overlay/asset/overlay.css">
+</head>
+<body>
+  <!--
+    B1 覆盖层页面（t57）：由插件宿主 webServer 同源提供，在系统浏览器 kiosk 窗口里全屏运行。
+    层次（z-index 见 overlay.css）：
+      1 #base  冻结帧（canvas，位图尺寸 = 冻结帧像素，CSS 尺寸 = 视口尺寸）
+      2 4 块遮罩（选区外压暗）
+      3 #selection 选区框（**兄弟节点**定位，避免 H-01 的子元素相对坐标二次偏移）
+      5 8 个把手（同样是兄弟节点）+ 十字线
+      4 #ink   标注层（canvas，只画选区内的标注，裁剪成对 save/restore）
+      6 #badge 实时 W×H
+      7 #toolbar 工具栏（工具 / 颜色 / 线宽 / 马赛克粒度 / 撤销重做 / 三个动作 + 取消）
+      8 #editor 文字输入框
+    页面不引用任何 DSH 客户端包或主题令牌，按钮均有 aria-label 且可 Tab 聚焦。
+  -->
+  <canvas id="base" class="layer" aria-hidden="true"></canvas>
+  <div id="mask-all" class="mask" aria-hidden="true"></div>
+  <div id="mask-top" class="mask" aria-hidden="true"></div>
+  <div id="mask-right" class="mask" aria-hidden="true"></div>
+  <div id="mask-bottom" class="mask" aria-hidden="true"></div>
+  <div id="mask-left" class="mask" aria-hidden="true"></div>
+  <div id="selection" aria-hidden="true"></div>
+
+  <!--
+    已放置标注的选中框（t70，B-13 的面板版）：虚线框 + 4 个角把手，都是**兄弟节点**，
+    直接用视口坐标定位（子节点会被父原点二次偏移 —— H-01 的坑）。
+  -->
+  <div id="annotation-box" aria-hidden="true"></div>
+  <div class="annot-handle" data-corner="nw" aria-hidden="true"></div>
+  <div class="annot-handle" data-corner="ne" aria-hidden="true"></div>
+  <div class="annot-handle" data-corner="se" aria-hidden="true"></div>
+  <div class="annot-handle" data-corner="sw" aria-hidden="true"></div>
+
+  <div id="cross-x" aria-hidden="true"></div>
+  <div id="cross-y" aria-hidden="true"></div>
+  <canvas id="ink" class="layer" aria-hidden="true"></canvas>
+  <div id="badge" aria-hidden="true"></div>
+
+  <!--
+    工具栏（t65/t66/t68）：
+      - 所有按钮都是**图标按钮**（悬停出名字，`title` + `aria-label`）：工具、撤销/重做，
+        以及三个动作「插入对话 ✓ / 复制 / 另存为 ⤓」与取消 ✕；
+      - **固定两行**（不靠自动折行 —— 折点随机、长短不齐很难看）：
+          第一行 = 工具（7 图标）+ 撤销/重做 + 右侧四个动作图标；
+          第二行 = 色板（按工具显隐）+ 线宽 / 字号 / 粒度（按当前工具出现）+ 右侧输出尺寸；
+      - **档位/色板按工具显隐**（t68/t72）：**颜色只在矩形/椭圆/箭头/画笔/文字下出现**
+        （移动不落色、马赛克的颜色不参与绘制）；线宽只在矩形/椭圆/箭头/画笔下出现；
+        字号只在文字工具下出现；粒度只在马赛克工具下出现。每个分组各带一根竖线，
+        且竖线只在"后面有可见分组、前面也已经有可见分组"时显示（不留孤立竖线）。
+    `#hint` / `#notice` 是文字行，跟在两行按钮下面（不是按钮行）。
+  -->
+  <div id="toolbar" role="toolbar" aria-label="截图工具栏 / Screenshot toolbar">
+    <div class="row" id="row-tools">
+      <div class="group" id="group-tools"></div>
+      <span class="divider" aria-hidden="true"></span>
+      <div class="group" id="group-history"></div>
+      <span class="grow" aria-hidden="true"></span>
+      <div class="group" id="group-actions"></div>
+    </div>
+    <div class="row" id="row-style">
+      <div class="group" id="group-colors"></div>
+      <span class="divider" id="divider-widths" aria-hidden="true"></span>
+      <div class="group" id="group-widths"></div>
+      <span class="divider" id="divider-sizes" aria-hidden="true" hidden></span>
+      <div class="group" id="group-sizes" hidden></div>
+      <span class="divider" id="divider-mosaic" aria-hidden="true" hidden></span>
+      <div class="group" id="group-mosaic" hidden></div>
+      <span class="grow" aria-hidden="true"></span>
+      <span class="label" id="size-label" aria-live="off"></span>
+    </div>
+    <div id="hint">拖动鼠标框选，Esc 取消，右键取消</div>
+    <div id="notice" role="status" aria-live="polite"></div>
+  </div>
+
+  <input id="editor" type="text" aria-label="标注文字 / Annotation text" placeholder="输入文字后回车">
+
+  <!--
+    识别与翻译的结果卡片（t75）。
+    两种来源都落在这张卡片上：工具栏的「识别」按钮只填上半张（原文），「翻译」按钮把两半都填上。
+    它是**选区之外的兄弟节点**（和工具栏、把手同一个套路）：位置由 overlay.js 的 placeCard() 按
+    选区算出来，不参与选区的坐标体系，也不会被遮罩压暗。
+    卡片的指针事件被 isChromeTarget() 排除，所以在卡片里划选文字不会顺手拖出一个新选区。
+  -->
+  <div id="ocr-card" role="dialog" aria-label="识别与翻译 / OCR and translation" hidden>
+    <div class="ocr-block" id="ocr-source-block">
+      <div class="ocr-head">
+        <span class="ocr-title" id="ocr-source-title">识别文字 / Recognized</span>
+        <span class="ocr-meta" id="ocr-source-meta" aria-live="polite"></span>
+        <span class="grow" aria-hidden="true"></span>
+        <button type="button" class="btn" id="ocr-copy-source">复制 / Copy</button>
+        <button type="button" class="btn icon" id="ocr-close" aria-label="关闭识别结果 / Close OCR result">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+            <path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" fill="none" stroke="currentColor"
+                  stroke-width="1.4" stroke-linecap="round"></path>
+          </svg>
+        </button>
+      </div>
+      <pre class="ocr-text" id="ocr-source-text" tabindex="0"></pre>
+    </div>
+    <div class="ocr-block" id="ocr-target-block" hidden>
+      <div class="ocr-head">
+        <span class="ocr-title">译文 / Translation</span>
+        <label class="ocr-lang" for="ocr-target-select">
+          <span class="label">目标 / Target</span>
+          <select id="ocr-target-select" aria-label="目标语言 / Target language"></select>
+        </label>
+        <span class="ocr-meta" id="ocr-target-meta" aria-live="polite"></span>
+        <span class="grow" aria-hidden="true"></span>
+        <button type="button" class="btn" id="ocr-copy-target">复制 / Copy</button>
+      </div>
+      <pre class="ocr-text" id="ocr-target-text" tabindex="0"></pre>
+    </div>
+  </div>
+
+  <!-- 页面逻辑：普通 ES 模块；纯逻辑一律 import 宿主的 /overlay/lib/*.mjs，不复制一份 -->
+  <script type="module" src="/api/dsh-screenshot/overlay/asset/overlay.js"></script>
+
+  <!--
+    启动看门狗（t64 实机缺陷的经验）：页面的 css/js 都从宿主的前缀加载，任何一族 404
+    都会让窗口只剩未样式化的骨架 —— 用户看到的是"白底 + 一行提示文字 + 一个输入框"，
+    而 DSH 日志里只有 5 s 之后的一条 aborted。这段内联脚本不依赖任何模块，把这种情况
+    直接写在屏幕上（含自身 URL，便于对日志）。
+  -->
+  <script>
+    window.setTimeout(function () {
+      if (window.__overlayState === 'ready') return;
+      var banner = document.createElement('div');
+      banner.id = 'boot-error';
+      banner.setAttribute('role', 'alert');
+      banner.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99;padding:10px 14px;'
+        + 'background:#7f1d1d;color:#fff;font:14px/20px system-ui,-apple-system,sans-serif;white-space:pre-wrap';
+      banner.textContent = window.__overlayState === undefined
+        ? '截图面板脚本未能加载（资源 404？）\noverlay assets failed to load\n' + location.href
+        : '截图面板启动失败 · overlay boot failed\n' + window.__overlayState;
+      document.body.appendChild(banner);
+    }, 4000);
+  </script>
+</body>
+</html>

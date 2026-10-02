@@ -1,0 +1,12 @@
+# 依赖与构建产物：装出来就有，不进仓库
+node_modules/
+dist/
+*.tgz
+
+# ONNX OCR 模型（首次使用按需下载到用户数据目录；这里只是防手滑）
+*.onnx
+*.part
+
+# 本机运行时产物
+*.log
+tests/**/tmp/
