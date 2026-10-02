@@ -126,8 +126,9 @@ Windows 自带引擎对**小字中文截图**很差（同一张 1978×1059 的�
 | `ocrDownloadModels` | `true` | 首次识别时按需下载模型（SHA256 校验，写入 `.part` 再原子改名）。`false` = 永不联网，只用已有模型或 Windows 引擎 |
 | `ocrDetLimit` | `960` | 检测输入长边上限（夹在 320–4096）；调大更准更慢 |
 
-**依赖与体积**：运行时是 npm 包 `onnxruntime-node`（预编译，免 Python/GPU/管理员）。它的 postinstall 要下载原生库，
-所以在 DSH 里**安装/更新本插件时要允许构建脚本**（管理器会问）。这个包把各平台二进制都打进 tarball（实测 287MB），
+**依赖与体积**：运行时是 npm 包 `onnxruntime-node`（预编译，免 Python/GPU/管理员），声明为
+**可选依赖**：不允许构建脚本 / 装不上 / 离线时**插件照样能装能用**，OCR 自动回落 Windows 引擎（`auto` 档）。
+它的 postinstall 会下载原生库，所以安装时**允许构建脚本**能让 OCR 更强（管理器会问）。这个包把各平台二进制都打进 tarball（实测 287MB），
 本插件带一个裁剪助手，只留当前平台：
 
 ```
