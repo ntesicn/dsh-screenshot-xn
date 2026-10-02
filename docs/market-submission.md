@@ -18,16 +18,16 @@
 
    ```sh
    cd E:/dshplugins/dsh-screenshot
-   git remote add origin https://github.com/OWNER/dsh-screenshot-xn.git
+   git remote add origin https://github.com/ntesicn/dsh-screenshot-xn.git
    git push -u origin main
    ```
 
 2. **Fork** `awesome-dsh-plugin/awesome-dsh-plugin`，然后在你的 fork 里新增下面这个文件（名字必须是
-   `data/plugins/OWNER__dsh-screenshot-xn.yml`）。描述里含 `: ` 时必须加引号，否则 YAML 解析失败：
+   `data/plugins/ntesicn__dsh-screenshot-xn.yml`）。描述里含 `: ` 时必须加引号，否则 YAML 解析失败：
 
    ```yaml
-   url: https://github.com/OWNER/dsh-screenshot-xn
-   name: OWNER/dsh-screenshot-xn
+   url: https://github.com/ntesicn/dsh-screenshot-xn
+   name: ntesicn/dsh-screenshot-xn
    category: ui
    description:
      en: 'Full-screen screenshot panel for DSH: marquee select, annotate, then insert, copy or save as, with offline OCR and translation.'
@@ -37,7 +37,7 @@
    - `category` 取值来自官方列表；截图类工具用 `ui`（UI 增强）。若你更想突出识别能力，`vision` 也在表里。
    - `owner__repo` 的下划线是**两个**，文件名必须与仓库名一致。
 
-3. **开 PR**，标题例如 `Add OWNER/dsh-screenshot-xn`。CI 会依次检查：条目数（≤3）→ 你仓库的 `dsh.bundle`
+3. **开 PR**，标题例如 `Add ntesicn/dsh-screenshot-xn`。CI 会依次检查：条目数（≤3）→ 你仓库的 `dsh.bundle`
    → 仓库年龄（≥1 天）→ `awesome-lint` 与站点构建。失败时 PR 评论会指出要改什么，改完推到同一分支即可。
 
 ## 可选但推荐
@@ -47,7 +47,7 @@
 - **截图**：已在本仓库放好 `screenshots.json` + `assets/shot-*.png`（市场详情页会展示 App Store 风格截图）。
   之后换图只要推自己的仓库，下一次构建自动生效。
 - **预构建 tarball**：若你的仓库无法从源码安装，需要把 `.tgz` 挂到 GitHub Release 并在条目里用
-  `tarball: https://github.com/OWNER/dsh-screenshot-xn/releases/latest/download/dsh-screenshot-xn-1.0.0.tgz`
+  `tarball: https://github.com/ntesicn/dsh-screenshot-xn/releases/latest/download/dsh-screenshot-xn-1.0.0.tgz`
   指向它。本插件可以从源码安装（`dsh plugin add`），所以这一项不是必需的 ——
   但注意 `onnxruntime-node` 的 postinstall 需要下载原生库，从源码安装时 DSH 会要求**批准构建脚本**；
   发布 npm 包可以免掉这一步。

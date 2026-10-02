@@ -21,11 +21,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/dsh-screenshot-xn.git"
+    "url": "git+https://github.com/ntesicn/dsh-screenshot-xn.git"
   },
-  "homepage": "https://github.com/OWNER/dsh-screenshot-xn#readme",
+  "homepage": "https://github.com/ntesicn/dsh-screenshot-xn#readme",
   "bugs": {
-    "url": "https://github.com/OWNER/dsh-screenshot-xn/issues"
+    "url": "https://github.com/ntesicn/dsh-screenshot-xn/issues"
   },
   "files": [
     "index.js",
