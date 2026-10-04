@@ -69,7 +69,7 @@ Installation is handled by the official `plugin_manager` tool; **do not** hand-w
    | `failed` | Look at the response body's `warnings`/error reason; the usual cause is that `target` is not this directory's absolute path |
 
 4. Self-check list (can be done within 30 s after install + restart):
-   - Open any ordinary conversation; the screenshot button appears in the input box's action area, and hovering shows "截图 / Screenshot";
+   - Open any ordinary conversation; the screenshot button appears in the input box's action area, and hovering shows 「截图 / Screenshot」;
    - Click the button: the DSH window flickers (temporarily hidden and then restored), and then **the whole screen** is covered by the screenshot panel (including the taskbar);
    - Marquee select a region → the toolbar appears → click 「复制」 → the panel closes, you are back in DSH, and a success toast appears;
    - Press Esc in the panel (or right-click, or make the selection too small) → the panel closes, and the draft text and attachments in DSH are exactly the same as before entering;
@@ -249,7 +249,7 @@ Leftover check: after uninstalling, `%TEMP%\dsh-screenshot-xn` holds at most the
 
 ## Features and interaction (against DoD section B)
 
-- **Entry point**: the screenshot button in the input box's action area (`conversation.input.right`), with the label "截图 / Screenshot"; `Alt+A` is the same entry point (an in-app shortcut, see "Limitations").
+- **Entry point**: the screenshot button in the input box's action area (`conversation.input.right`), with the label 「截图 / Screenshot」; `Alt+A` is the same entry point (an in-app shortcut, see "Limitations").
 - **Two capture modes (right-click menu, C-6)**: **right-clicking the screenshot icon** pops up the mode menu (real-machine shot: **② Switch modes from the right-click menu** under "Preview"); choose "through capture (hide DSH)" (**the default**) or "normal capture (including the DSH window)":
   - Through: DSH is temporarily hidden before the capture and restored after it, and **there is no DSH in the image** (this is what normal screenshots use);
   - Normal: no hiding, and **the DSH window is right there in the image** (used to capture DSH's own UI); in this case the panel's hint line states 「普通模式：这次画面里包含 DSH 窗口…」, and the DSH side also gives a hint that 「普通模式：本次画面会包含 DSH 窗口」 — so you will not think the plugin is broken;
@@ -289,7 +289,7 @@ Leftover check: after uninstalling, `%TEMP%\dsh-screenshot-xn` holds at most the
   - **What is recognized is the original image on screen**: the region to be recognized is **cut as-is** from the frozen frame, without drawing annotations — if you draw a red frame over text and then click recognize, the red frame does not become part of the recognition result (the same goes for mosaic: what you want to hide should not be recognized).
   - **As soon as the selection changes, the card collapses immediately**: results are accounted against "the selection that produced them", so there is no such thing as "after shrinking the selection, the translation is still of the previous region's text".
   - Recognition is **offline**: `Windows.Media.Ocr` is an engine built into Windows, needing no API key and no network. Translation in turn uses **the model you already configured in DSH** (zero configuration by default) and asks for no extra key.
-  - No text in the selection **is not an error**: the card writes "没识别到文字 · No text found". Genuine failures each have their own words: no language pack installed, recognition timeout, model unavailable, translation timeout, text too long (truncated by line above 8000 characters and marked) — each has its own error code (`OCR_ERROR_KEYS` in `lib/ocr.mjs` maps host codes to panel copy, so the two sides never each write their own set).
+  - No text in the selection **is not an error**: the card writes 「没识别到文字 · No text found」. Genuine failures each have their own words: no language pack installed, recognition timeout, model unavailable, translation timeout, text too long (truncated by line above 8000 characters and marked) — each has its own error code (`OCR_ERROR_KEYS` in `lib/ocr.mjs` maps host codes to panel copy, so the two sides never each write their own set).
 
 ---
 
@@ -341,7 +341,7 @@ The division of labor among the three scripts:
 - `tests/ocr-browser-probe.mjs`: **t75's end to end** (real browser panel × real host routes × real `Windows.Media.Ocr`, with only the model as a stand-in). The frozen frame is **composited by the script according to the viewport size** (white background + `tests/fixtures/ocr-sample.png` pasted as-is in the top-left corner) — so the frame and viewport are 1:1, exactly the situation of a real-machine full-screen kiosk; if the frame's aspect ratio does not match the viewport, the panel's single-ratio mapping squashes the selection (this was hit before, see the comments in the script). The assertions cover: recognizing the **complete text with no Chinese spaces**, the card landing inside the viewport, the model route used for translation, **changing the target language re-translating without re-recognizing** (exactly 2 model calls + only one "recognized text" log line on the host), the system clipboard read back in **another process matching character for character** after copying, pressing the pointer inside the card not moving the selection, the card collapsing automatically after the selection changes, a blank region reporting "no text found", and `Esc` closing the card first. Session progress is printed to `console` and also collected on the Node side through the CDP event channel, so **even if the page is closed you can locate which step it got stuck at**. Machines without a browser or without the OCR language pack installed print `[SKIP]` and exit with 0.
 - `tests/negative-asset-order.mjs`: reverts the rule "the static asset branch comes before token validation" to its defective state, to confirm that `validate.mjs` X-1 and the e2e static asset scenario **both fail** (guarding against "whatever you write turns green").
 
-Two points about the copy: the host card copy comes from `meta` in `locale/*.json` (the official DSH convention: read only `meta.title`/`meta.description`, with `en.json` as the language fallback); the UI copy's key set corresponds **one to one** with `TEXT` in `client.js` (the client renders the "Chinese / En" parallel labels directly, satisfying DoD B-1's "截图 / Screenshot"), so when changing copy, change `client.js` and both locale files at the same time.
+Two points about the copy: the host card copy comes from `meta` in `locale/*.json` (the official DSH convention: read only `meta.title`/`meta.description`, with `en.json` as the language fallback); the UI copy's key set corresponds **one to one** with `TEXT` in `client.js` (the client renders the "Chinese / En" parallel labels directly, satisfying DoD B-1's 「截图 / Screenshot」), so when changing copy, change `client.js` and both locale files at the same time.
 
 Directory structure:
 
@@ -359,4 +359,4 @@ dsh-screenshot/
 ├─ icon.svg              # plugin icon (≤256 KiB, no external references)
 ├─ README.md             # the Chinese README
 └─ README.en.md          # the English README (this file)
-`
+```
