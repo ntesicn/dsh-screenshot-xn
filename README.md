@@ -1,5 +1,7 @@
 # dsh-screenshot-xn（DSH 截图）
 
+**简体中文** ｜ [English](README.en.md)
+
 给 DSH Desktop 加一个截图插件：点输入框旁的按钮（或按 `Alt+A`）→ 屏幕整体变暗、出现**独立的全屏截图面板**（微信式：覆盖整屏含任务栏，DSH 窗口先被临时隐藏，所以你看到的就是真实桌面）→ 框选并标注（矩形／椭圆／箭头／画笔／马赛克／文字，可撤销重做）→ 点「插入对话／复制／另存为」，面板关闭，结果落到 DSH 里。
 
 同一块选区还能**识别文字**和**翻译**：工具栏最左边的「识别文字」把框选区域读成可复制、可编辑的文本（默认引擎 PP-OCRv6，在本机跑，**离线、无密钥**；模型没就绪时回落 Windows 自带 OCR），「翻译」再把它翻成 9 种语言的任意一种（用**你在 DSH 里已经配好的模型**，默认零配置）；原文与译文都落在同一张结果卡片上，各自带「复制 / Copy」。
@@ -355,5 +357,6 @@ dsh-screenshot/
 ├─ tests/                # 脱机单测 + 三个复跑脚本（overlay-e2e / overlay-browser-probe / ocr-browser-probe）+ negative-asset-order.mjs（负样本证明）
 ├─ locale/               # Plugin Manager 卡片文案（meta）+ 与 client.js TEXT 一一对应的双语 UI 文案（ui）
 ├─ icon.svg              # 插件图标（≤256 KiB，无外部引用）
-└─ README.md
+├─ README.md             # 中文说明（本文件）
+└─ README.en.md          # 同一份说明的英文版（English README）
 ```
