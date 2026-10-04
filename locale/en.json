@@ -64,6 +64,7 @@
     "overlayOpened": "Opening the screenshot overlay, select on screen",
     "overlayFallback": "Overlay unavailable, using the in-DSH capture",
     "overlayNoBrowser": "No browser found (Edge / Chrome), using the in-DSH capture",
+    "overlayAccessDenied": "DSH Desktop refused the standalone overlay for this Profile (browser access is off, the page gets 403 forbidden), using the in-DSH capture",
     "overlayAborted": "The overlay ended without a result, please retry",
     "overlayTimeout": "The overlay timed out, please retry",
     "overlayUnreachable": "Lost contact with the overlay host, please retry",

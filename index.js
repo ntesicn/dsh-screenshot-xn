@@ -154,6 +154,17 @@ export const DEFAULT_OVERLAY_RETAIN_MS = 30_000;
 export const DEFAULT_OVERLAY_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 /** Actions the overlay may report besides `cancel`. */
 export const OVERLAY_ACTIONS = Object.freeze(['insert', 'copy', 'save']);
+/**
+ * Reason returned when DSH Desktop's web server refuses ordinary browser access (t79).
+ *
+ * The kiosk is an **ordinary** browser request (no `x-dsh-desktop-renderer` header), so
+ * with the per-profile `openBrowser` switch off it receives `403 forbidden` instead of
+ * the page. Reported as this code so the client can name the switch instead of showing
+ * a generic overlay failure.
+ */
+export const OVERLAY_ACCESS_DENIED_REASON = 'desktop-browser-access-denied';
+/** Ceiling for the pre-launch access probe; a slow answer must not stall the start. */
+export const OVERLAY_PREFLIGHT_TIMEOUT_MS = 4_000;
 // ── OCR + translation (t75) ─────────────────────────────────────────────────
 /**
  * OCR script shipped with this package. It runs under **Windows PowerShell 5.1**
@@ -1449,6 +1460,54 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
       + '&ocr=1';
   }
 
+  /**
+   * 启动前的可达性预检：宿主自己以**普通 HTTP 客户端**的身份取一次面板页。
+   *
+   * 实机缺陷（t79）：DSH Desktop 的 webServer 有一道"普通浏览器访问"闸门
+   * （`desktop-browser-access`）：当它判定请求不是渲染器时，`rejectBrowserRequest`
+   * 直接回 **403 + 纯文本 `forbidden`**。闸门按 profile 生效（`dsh-desktop` 的
+   * `openBrowser`，且只在 `mode: compatibility` 下有意义）。开着闸门时：
+   *
+   * - kiosk 打开的是那 9 个字节的 `forbidden` 文本，不是面板页；
+   * - 页面一行脚本都没跑 → 没有心跳 → 5 s 后 `overlay aborted: no heartbeat`。
+   *
+   * 用户看到的就是"整屏灰白 + 左上角 forbidden"，而 DSH 里只是一句笼统的失败提示。
+   * 预检把这件事变成明确的 reason，客户端就能说明白该去开哪个开关。
+   *
+   * 预检结论直接外推给 kiosk：两者都是**没有渲染器头的普通请求**，命中同一条判定。
+   * 探针失败（网络层异常）不算拒绝 —— 那时照常去试，别把可用的路径拦掉。
+   *
+   * @param {string} pageUrl - 本次会话的面板页 URL。
+   * @returns {Promise<string|undefined>} 被拒绝时返回 `desktop-browser-access-denied`。
+   */
+  async function preflightOverlayAccess(pageUrl) {
+    if (typeof fetch !== 'function') return undefined;
+    let response;
+    try {
+      response = await fetch(pageUrl, {
+        method: 'GET',
+        cache: 'no-store',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(OVERLAY_PREFLIGHT_TIMEOUT_MS),
+      });
+    } catch (error) {
+      log(ctx, 'warn', `overlay preflight could not reach the page: ${message(error)}`);
+      return undefined;
+    }
+    if (response.status !== 403) return undefined;
+    let body = '';
+    try {
+      body = await response.text();
+    } catch {
+      body = '';
+    }
+    // 只有 DSH Desktop 那道闸门的 403 才算数：正文恰好是 `forbidden`（见
+    // `lib/webserver.js` 的 `rejectBrowserRequest`）。别的 403（例如未来的鉴权）
+    // 不该被说成"浏览器访问被关掉了"。
+    if (body.trim() !== 'forbidden') return undefined;
+    return OVERLAY_ACCESS_DENIED_REASON;
+  }
+
   /** First available browser executable, or undefined when none is installed. */
   async function resolveBrowser() {
     const configured = settings.overlayBrowserPaths;
@@ -1627,6 +1686,13 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
     if (launch === undefined) {
       log(ctx, 'warn', 'overlay start: no browser available, the client must fall back to the in-DSH overlay');
       return { ok: false, reason: 'no-browser' };
+    }
+    // t79：先问清楚宿主会不会把这一页交给普通浏览器 —— 拒绝时立刻收手，不做无用的抓屏，
+    // 也不开那个只会显示 `forbidden` 的 kiosk 窗口。
+    const denied = await preflightOverlayAccess(pageUrl);
+    if (denied !== undefined) {
+      log(ctx, 'warn', `overlay start: the web server refuses ordinary browser access (403 forbidden) at ${pageUrl}; enable browser access for this profile`);
+      return { ok: false, reason: denied };
     }
     const captureStartedAt = Date.now();
     // t67：模式由调用方（DSH 侧的右键菜单）决定 —— `through` 先隐藏 DSH 再抓（默认，画面不含 DSH），

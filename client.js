@@ -2294,6 +2294,7 @@ function pngFileOf(blob, now = new Date(), mediaType = PNG_MIME) {
       overlayOpened: '正在打开截图面板，请在屏幕上框选 / Opening the screenshot overlay, select on screen',
       overlayFallback: '独立截图面板不可用，已改用 DSH 内截图 / Overlay unavailable, using the in-DSH capture',
       overlayNoBrowser: '未找到可用的浏览器（Edge / Chrome），已改用 DSH 内截图 / No browser found (Edge / Chrome), using the in-DSH capture',
+      overlayAccessDenied: 'DSH Desktop 挡住了独立截图面板（当前 Profile 未允许在浏览器中打开，面板只能得到 403 forbidden），已改用 DSH 内截图 / DSH Desktop refused the standalone overlay for this Profile (browser access is off, the page gets 403 forbidden), using the in-DSH capture',
       overlayAborted: '截图面板未返回结果就结束了，请重试 / The overlay ended without a result, please retry',
       overlayTimeout: '截图面板超时没有返回结果，请重试 / The overlay timed out, please retry',
       overlayUnreachable: '与截图面板失去联系（宿主未响应），请重试 / Lost contact with the overlay host, please retry',
@@ -2945,13 +2946,17 @@ function pngFileOf(blob, now = new Date(), mediaType = PNG_MIME) {
 
     /**
      * 面板不可用时的可见提示（纯判定）：
-     * 无浏览器与"路由不存在/启动失败"给不同措辞，但都会回退 DSH 内流程。
+     * 无浏览器、"浏览器访问被 DSH Desktop 关掉"与"路由不存在/启动失败"给不同措辞，
+     * 但都会回退 DSH 内流程。
      * @param {unknown} reason
      * @returns {string}
      */
     function overlayFallbackNotice(reason) {
       const detail = typeof reason === 'string' ? reason : '';
       if (detail.includes('no-browser')) return TEXT.overlayNoBrowser;
+      // t79：宿主的预检已经查清是那道闸门（403 forbidden），照原样把原因说出来，
+      // 而不是让用户对着"整屏灰白 + forbidden"猜。
+      if (detail.includes('desktop-browser-access-denied')) return TEXT.overlayAccessDenied;
       return detail === '' ? TEXT.overlayFallback : `${TEXT.overlayFallback}（${detail}）`;
     }
 

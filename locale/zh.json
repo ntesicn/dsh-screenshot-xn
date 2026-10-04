@@ -64,6 +64,7 @@
     "overlayOpened": "正在打开截图面板，请在屏幕上框选",
     "overlayFallback": "独立截图面板不可用，已改用 DSH 内截图",
     "overlayNoBrowser": "未找到可用的浏览器（Edge / Chrome），已改用 DSH 内截图",
+    "overlayAccessDenied": "DSH Desktop 挡住了独立截图面板（当前 Profile 未允许在浏览器中打开，面板只能得到 403 forbidden），已改用 DSH 内截图",
     "overlayAborted": "截图面板未返回结果就结束了，请重试",
     "overlayTimeout": "截图面板超时没有返回结果，请重试",
     "overlayUnreachable": "与截图面板失去联系（宿主未响应），请重试",

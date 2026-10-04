@@ -451,6 +451,23 @@ test('(t59-5) startShot: an unavailable panel is visible and falls back to the i
   });
   assert.deepEqual(api.startCaptureCalls, [{ through: true }]);
   assert.equal(thrown.state.phase, 'idle');
+
+  // (d) t79：DSH Desktop 的浏览器访问闸门关着（宿主预检拿到 403 forbidden）——
+  // 措辞必须点名那道闸门，而不是让用户对着"整屏灰白 + forbidden"猜；回退照旧。
+  api.startCaptureCalls.length = 0;
+  const denied = fakeRuntime();
+  await api.startShot(denied, {
+    startSession: async () => ({ ok: false, reason: 'desktop-browser-access-denied' }),
+    poll: async () => {
+      throw new Error('不该轮询');
+    },
+  });
+  assert.deepEqual(api.startCaptureCalls, [{ through: true }], '被闸门挡住时也必须回退，不能什么都不做');
+  assert.equal(denied.state.phase, 'idle');
+  assert.equal(denied.toasts[0].kind, 'warn');
+  assert.match(denied.toasts[0].text, /DSH Desktop 挡住了独立截图面板/);
+  assert.match(denied.toasts[0].text, /403 forbidden/, '把闸门的证据带上，用户才知道去哪儿开');
+  assert.doesNotMatch(denied.toasts[0].text, /desktop-browser-access-denied/, '机器码不该出现在用户可见文案里');
 });
 
 test('(t59-6) deliverOverlayResult: the three actions run in DSH with the PNG media type, and cancel is not an error', async () => {
