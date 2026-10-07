@@ -3,56 +3,104 @@
 按官方贡献指南（<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md>）：
 **一个 PR 只加一个文件** `data/plugins/<owner>__<repo>.yml`，两个 README 由脚本生成、**不要手改**。
 
-## 先满足三条硬门槛
+## 三条硬门槛
 
 | 门槛 | 我们的状态 |
 | --- | --- |
 | 仓库 `package.json` 声明 **`dsh.bundle`**（只声明 `dsh.client` 是最常见的被拒原因） | ✅ `dsh.bundle.patch: ./cordis.patch.yml`，且 `cordis.patch.yml` 在仓库根 |
 | 仓库里有**真实可用的代码**（占位/纯 README 不收） | ✅ 189 个离线用例 + e2e/负样本脚本 |
-| 仓库**创建满 1 天** | ⚠️ 需要你先把仓库建好并等满 1 天再提 PR（当场提会被 CI 打回） |
+| 仓库**创建满 1 天** | ✅ 仓库建于 2026-10-02，已满 |
 
-## 步骤
+## 已提交的内容
 
-1. **建公开仓库并推送**（把 `OWNER` 换成你的 GitHub 账号；`package.json` 里的 `repository` / `homepage` / `bugs`
-   三处也要把 `OWNER` 换掉，npm 发布时 `repository` 必须指回本仓库）：
+PR：<https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/6538>（标题 `Add ntesicn/dsh-screenshot-xn`）
 
-   ```sh
-   cd E:/dshplugins/dsh-screenshot
-   git remote add origin https://github.com/ntesicn/dsh-screenshot-xn.git
-   git push -u origin main
-   ```
+这条 PR 就是**唯一**的上架通道：DSH 市场本身（`node_modules/dshmarket`）不是插件目录，它每次打开都实时拉
+`https://awesome-dsh-plugin.com/plugins.json`（`src/regions.ts:80` `CATALOG_OFFICIAL`），而那份数据由精选列表
+的 CI 每日生成。所以**合并后站点与本机市场会自动收录，通常一天内生效**，不需要再往别处提交。
 
-2. **Fork** `awesome-dsh-plugin/awesome-dsh-plugin`，然后在你的 fork 里新增下面这个文件（名字必须是
-   `data/plugins/ntesicn__dsh-screenshot-xn.yml`）。描述里含 `: ` 时必须加引号，否则 YAML 解析失败：
+新增的唯一文件 `data/plugins/ntesicn__dsh-screenshot-xn.yml`：
 
-   ```yaml
-   url: https://github.com/ntesicn/dsh-screenshot-xn
-   name: ntesicn/dsh-screenshot-xn
-   category: ui
-   tarball: https://github.com/ntesicn/dsh-screenshot-xn/releases/latest/download/dsh-screenshot-xn-1.0.0.tgz
-   description:
-     en: 'Full-screen screenshot panel for DSH: marquee select, annotate, then insert, copy or save as, with offline OCR and translation.'
-     zh: 'DSH 整屏截图面板：框选、标注，一键插入对话 / 复制 / 另存为，并支持离线 OCR 识别与翻译。'
-   ```
+```yaml
+url: https://github.com/ntesicn/dsh-screenshot-xn
+name: ntesicn/dsh-screenshot-xn
+category: vision
+description:
+  en: 'Full-screen screenshot panel for the DSH composer: ...'   # 661 字符，见文件
+  zh: 'DSH 输入框旁的整屏截图面板：...'                            # 245 字符，见文件
+tarball: https://github.com/ntesicn/dsh-screenshot-xn/releases/download/v1.0.1/dsh-screenshot-xn-1.0.1.tgz
+```
 
-   - `category` 取值来自官方列表；截图类工具用 `ui`（UI 增强）。若你更想突出识别能力，`vision` 也在表里。
-   - `owner__repo` 的下划线是**两个**，文件名必须与仓库名一致。
-   - `tarball:` 指向本仓库已发布的 Release 资产（`v1.0.0`）。它必须是 GitHub Release 托管的 https `.tgz` ——
-     商店会优先展示它而不是源码构建命令。资产内容与本地 `npm pack` 的产物逐字节一致（SHA256
-     `53B936EB4074584DEDFE334EDCED15663CFE4554412E0C21E97DE79518273729`，286012 字节）。
+- `category` 用 `vision`（官方合法取值之一）。截图工具原本也可填 `ui`；选不准不会被打回，维护者会直接改。
+- `owner__repo` 的下划线是**两个**，文件名必须与仓库名一致。
+- 描述含 `: ` 时必须加引号；`zh` 里所以用全角冒号规避。
+- `tarball:` 指向本仓库已发布的 Release 资产，必须是 GitHub Release 托管的 https `.tgz`。
+- 描述必须**属实**、无营销词与最高级 —— 维护者会读目标仓库源码逐条核对。
 
-3. **开 PR**，标题例如 `Add ntesicn/dsh-screenshot-xn`。CI 会依次检查：条目数（≤3）→ 你仓库的 `dsh.bundle`
-   → 仓库年龄（≥1 天）→ `awesome-lint` 与站点构建。失败时 PR 评论会指出要改什么，改完推到同一分支即可。
+## 编码事故（已修复）
+
+第一版用 shell 传中文，`description.zh` 的汉字被压成了 **157 个字面 `?`**（文件里 non-ASCII 字节数为 0）。
+同一个问题也让 PR 描述正文乱码。修复方式：
+
+- 用 `write` 工具（而非命令行）重写条目文件为 UTF-8（LF、无 BOM、末尾换行，1463 字节、non-ASCII 480 字节）。
+- 提交 `dc3987e Fix mojibake in the zh description for ntesicn/dsh-screenshot-xn`（提交信息用 ASCII）并推到同一分支。
+- PR 描述正文通过 GitHub API 重写（`PATCH /repos/.../pulls/6538`）。
+
+**教训**：向 git / GitHub 传中文一律走文件写入，绝不经 PowerShell 参数或管道拼接；提交信息保持 ASCII。
+
+## 前置开关（新机器为什么会"退回旧行为"）
+
+在一台**新机器**上从 git 安装后复现：点截图是"DSH 窗口里先出一张冻结帧、再在这张图上框选"，而不是整屏面板。
+
+根因不在本插件，也不是版本不一致（两端 HEAD 都是 `7992ccc`）：DSH Desktop 的 webServer 上有一道闸门
+（实测 2.0.15：`lib/webserver.js` 的 `permits()` 每请求现查 `desktopBrowserAccess`；
+`lib/desktop-browser-access-*.js` 的 `decideDesktopBrowserAccess`）。`ordinaryBrowserEnabled`（即 `openBrowser`，默认 `false`）
+为假时，**一切非 Electron 渲染器请求一律 `403` + 正文 `forbidden`**。而面板页恰恰是由普通浏览器（kiosk 窗口）加载的，
+所以默认设置下必然被拒；插件预检命中 `desktop-browser-access-denied` 后按设计回退到 DSH 内覆盖层。
+本机能用，只是因为本机 profile 补丁里手工开了这个开关。
+
+评估过但**放弃**的架构改法，记在这里免得重走：
+① 插件自带一个只绑 `127.0.0.1` 的回环 origin 来承载面板 —— 可行（面板里的请求全是绝对路径
+`/api/dsh-screenshot/overlay/...`，换 origin 后**面板一行都不用改**），代价是多一个监听口；
+② 插件在宿主上下文里调 `desktopBrowserAccess.setOrdinaryBrowserEnabled(true)` —— 可行且立即生效，
+但等于**静默拆掉 DSH Desktop 的安全闸门**（把整个 DSH API 暴露给任意本机进程/网页），不做。
+
+**用户决定：不改架构，如实补文档。** 已落地：README 的「安装 → 前置开关」小节、故障排查表新增 403 那一行、
+「局限」第 2 条改写、「功能与交互」的可用性判定补充；市场条目 en/zh 描述各补一句
+（DSH Desktop 默认不放行普通浏览器访问，整屏面板还需打开「允许在浏览器中打开」）。
+
+## 本地自检
+
+```sh
+node E:/dshplugins/.market/validate.cjs
+```
+
+校验条目键名合法、`en`/`zh` 均以句号结尾、`category` 在白名单、`tarball` 匹配
+`^https://github\.com/.+/releases/download/.+/.*\.tgz$`（用 `js-yaml` 解析 `E:/dshplugins/.market/ntesicn__dsh-screenshot-xn.yml`）。
+
+## CI
+
+| 检查 | 结果 |
+| --- | --- |
+| `Submission gate` | ✅ 首个提交 `2fb4338` 通过：`dsh.bundle` declared, repo old enough, enough commits |
+| `check` | ✅ 修复提交 `dc3987e` 上通过（`success`）；此时 PR `mergeable_state = clean`、2 commits / +7 −0 |
+
+CI 绿灯只是前置条件；维护者会读源码核对描述与分类，并检查 PR 是否动了无关条目。反馈以 PR 评论给出，改完推到同一分支即可。
+
+## 当前状态（已完成 / 待办）
+
+| 项 | 状态 |
+| --- | --- |
+| 公开仓库 | ✅ <https://github.com/ntesicn/dsh-screenshot-xn>（`main`，`dsh.bundle` + `cordis.patch.yml` 就位） |
+| 预构建 Release | ✅ <https://github.com/ntesicn/dsh-screenshot-xn/releases/tag/v1.0.1>（资产 `dsh-screenshot-xn-1.0.1.tgz`，287776 字节；`v1.0.0` 亦在） |
+| 市场截图 | ✅ `screenshots.json` + `assets/shot-*.png` |
+| 提 PR 收录 | ✅ PR #6538 已开，等维护者 review / 合并 |
+| npm 发布 | ⬜ 需要在能访问 npm 的网络/终端里 `npm adduser`（见下），然后 `npm publish` |
 
 ## 可选但推荐
 
 - **发 npm**：市场会展示下载量并按下载量排序（收录与否不受影响）。发布时 `repository` 必须指回上面的仓库，
   映射由 registry 自动采集，**条目里不要写 `npm:` 字段**（会被校验拒绝）。
-- **截图**：已在本仓库放好 `screenshots.json` + `assets/shot-*.png`（市场详情页会展示 App Store 风格截图）。
-  之后换图只要推自己的仓库，下一次构建自动生效。
-- **预构建 tarball**：已发布 —— <https://github.com/ntesicn/dsh-screenshot-xn/releases/tag/v1.0.0>
-  （资产 `dsh-screenshot-xn-1.0.0.tgz`，286012 字节），条目里用 `tarball:` 指向它即可。
-  本插件本来也能从源码安装（`dsh plugin add`），但 tarball 让商店优先给出"下载即用"的入口。
 - **npm（本机网络受限）**：`www.npmjs.com` 在本机网络下返回 **403**（PowerShell 与浏览器一样），
   但 **registry 是通的**（`npm ping` → PONG）。所以注册/登录不能走网站，要走 CLI：
 
@@ -65,20 +113,11 @@
   登录成功后 token 会写进 `~/.npmrc`，之后直接 `npm publish` 即可（`package.json` 里的
   `publishConfig` 已把 registry 钉到官方源，避免本机默认的淘宝镜像把发布请求打回去）。
 
-## 当前状态（已完成 / 待办）
-
-| 项 | 状态 |
-| --- | --- |
-| 公开仓库 | ✅ <https://github.com/ntesicn/dsh-screenshot-xn>（`main`，`dsh.bundle` + `cordis.patch.yml` 就位） |
-| 预构建 Release | ✅ `v1.0.0`：<https://github.com/ntesicn/dsh-screenshot-xn/releases/tag/v1.0.0> |
-| 市场截图 | ✅ `screenshots.json` + `assets/shot-*.png` |
-| npm 发布 | ⬜ 需要在能访问 npm 的网络/终端里 `npm adduser`（见上），然后 `npm publish` |
-| 提 PR 收录 | ⬜ **等仓库创建满 1 天**后，在 `awesome-dsh-plugin` 加一个 `data/plugins/ntesicn__dsh-screenshot-xn.yml` |
-
 ## 本地打包
 
 ```sh
-npm pack --pack-destination ../dist     # 产出 dsh-screenshot-xn-1.0.0.tgz（约 0.27MB，只含白名单文件）
+npm pack --pack-destination ../dist     # 产出 dsh-screenshot-xn-1.0.1.tgz（约 0.28MB，只含白名单文件）
 ```
 
 包里**不含** ONNX 模型与 `node_modules`：模型在首次使用 OCR 时按需下载并校验 SHA256（`lib/ocr-models.mjs`）。
+`docs/` 不在 `package.json` 的 `files` 白名单里，改本文档不影响发布产物。

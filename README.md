@@ -68,9 +68,35 @@
    | `overridden` | 有更高优先级的层覆盖了本行，检查 profile 的 patch 层 |
    | `failed` | 看返回体的 `warnings`/错误原因；常见原因是 `target` 不是本目录的绝对路径 |
 
+   > **前置开关（每一台新机器都要看）：整屏面板需要 DSH Desktop 放行"普通浏览器访问"。**
+   > 主路径的「独立整屏截图面板」是由系统浏览器（Edge / Chrome 的 kiosk 窗口）去加载
+   > `http://127.0.0.1:<DSH 端口>/api/dsh-screenshot/overlay/page` 实现的；而 DSH Desktop 的 webServer
+   > **默认只放行带渲染器令牌的请求** —— 实测 DSH Desktop 2.0.15 里 `lib/webserver.js` 的 `permits()`
+   > 每次请求现查 `desktopBrowserAccess`，`lib/desktop-browser-access-*.js` 的 `decideDesktopBrowserAccess`
+   > 在 `ordinaryBrowserEnabled` 为 `false`（=`openBrowser` 的默认值）时对一切非 Electron 渲染器请求返回
+   > `denied`，于是响应是 `403` + 正文就 9 个字节 `forbidden`。
+   > **在默认设置下，kiosk 窗口拿到的就是这个 403**：插件在抓屏**之前**就会预检出来（`desktop-browser-access-denied`），
+   > 给出可见提示，并**自动回退**到「DSH 内覆盖层」流程（DSH 窗口里先出一张冻结帧，再在这张图上框选）。
+   > 这不是故障，也不是装的版本不对 —— 功能不缺失，但那不是主路径。
+   >
+   > 打开方式（任选其一，改完**重启 DSH Desktop**；host 半只在进程启动时加载）：
+   > - **界面**：DSH Desktop **设置 → 「浏览器与局域网」→ 勾选「允许在浏览器中打开」**。该开关只在窗口模式为「兼容模式」时可用，否则是灰的并写着「浏览器访问仅在兼容模式下可用；如需开启，请先选择兼容模式。」；
+   > - **配置**：往当前 profile 的 `cordis.patch.yml` 里加下面这一行（本机就是靠它验证的，`case` 与缩进照抄）：
+   >
+   >   ```yaml
+   >   - id: desktop-shell
+   >     name: dsh-plugin-desktop
+   >     config:
+   >       mode: compatibility
+   >       openBrowser: true
+   >       networkExposure: loopback
+   >   ```
+   >
+   > 不打开也能用：整屏面板那一套每次都走回退路径，标注、识别、翻译、插入、复制、另存为的行为完全一样。
+
 4. 自检清单（安装 + 重启后 30 秒内可做完）：
    - 打开任意普通会话，输入框动作区出现截图按钮，悬停显示"截图 / Screenshot"；
-   - 点按钮：DSH 窗口一闪（被临时隐藏后恢复），随后**整个屏幕**被截图面板盖住（含任务栏）；
+   - 点按钮：DSH 窗口一闪（被临时隐藏后恢复），随后**整个屏幕**被截图面板盖住（含任务栏）。若看到的是"DSH 窗口里出现一张冻结帧"，说明上面那条前置开关还没开（已知回退，不是故障，对照下一条）；
    - 框选一块区域 → 工具栏出现 → 点「复制」→ 面板关闭、回 DSH，出现成功提示；
    - 在面板里按 Esc（或右键、或框太小）→ 面板关闭，DSH 里的草稿文字与附件与进入前完全一致；
    - 把 Edge / Chrome 都临时改名（模拟"没有浏览器"）→ 点截图出现「未找到可用的浏览器…」并**照样能截**（回退 DSH 内覆盖层）。
@@ -230,6 +256,7 @@ node lib/prune-onnx-runtime.mjs --apply    # 真删：288MB → 65MB（win-x64�
 | 点截图后**全屏被一层白/灰底挡住，只看得见一行"拖动鼠标框选"和一个输入框** | 面板页的 **CSS/JS 没加载成功**（没样式化的骨架）。原因（t64 已修）：宿主把 token 校验放在静态资源分支之前，而页面的 `<link>`、`<script>` 与静态 `import '…/overlay/lib/x.mjs'` 都不带 token → 三族全 404、脚本一行不跑、没有心跳、5 s 后会话 `aborted`。**修好后必须重启 DSH Desktop**（宿主半只在进程启动时加载）；页面自带启动看门狗，再遇到这种情况会在屏幕顶部显示红色横幅（含自身 URL），宿主日志里也会有 `overlay static file missing:` 行 |
 | 点截图后提示「独立截图面板不可用…（overlay.start http 404）」 | 宿主半还是旧版（没有 overlay 路由）：**重启 DSH Desktop**。本次截图已经自动回退到 DSH 内覆盖层流程，功能不缺失 |
 | 点截图后提示「未找到可用的浏览器（Edge / Chrome）…」 | 机器上没有 Edge/Chrome，或 `overlayBrowserPaths` 指错了：面板无法全屏承载，本次截图自动回退到 DSH 内覆盖层流程 |
+| 点截图后提示「DSH Desktop 挡住了独立截图面板（…403 forbidden）…」 | **这是默认状态，不是故障**：DSH Desktop 的 webServer 默认只放行带渲染器令牌的请求，普通浏览器（kiosk 窗口）访问面板页一律得到 `403` + 正文 `forbidden`（`lib/webserver.js` 的 `permits()` → `decideDesktopBrowserAccess`，`openBrowser` 默认 `false`）。插件在抓屏前预检到这一条，**本次截图已自动回退**到 DSH 内覆盖层流程。想要完整的整屏面板：**设置 → 「浏览器与局域网」→ 勾选「允许在浏览器中打开」**（该开关只在兼容模式下可用），或在当前 profile 的 `cordis.patch.yml` 里给 `desktop-shell` 那行加 `openBrowser: true`，然后**重启 DSH Desktop**。细节见「安装」里的前置开关 |
 | 点截图后一直转圈 / 提示"抓屏失败" | 宿主抓屏路由没通。先在浏览器 fetch `/api/dsh-screenshot/capture` 看返回：`404` 表示路由未注册（插件未激活或 `webServer` 服务缺席，看 DSH 日志里 `[dsh-screenshot]` 行）；`502` 表示脚本失败，`message` 里带 `capture.*` 细分码（`capture.script-missing`＝`scriptPath` 指错、`capture.timeout`＝超时、`capture.spawn-failed`＝powershell 找不到） |
 | 点截图后 `502` 且 `message` 含 `capture.timeout` | 单次抓屏超过 `timeoutMs`。先把 `timeoutMs` 调大；若仍超时，手动执行 `npm run capture:probe` 观察耗时（本机实测：脚本自身抓屏 73 ms、含保存 155 ms；Node 拉起进程后端到端约 560 ms） |
 | 面板出现了，但 DSH 窗口仍然出现在画面里 | 宿主没能确认"这是 DSH 的窗口"（pid/映像名/标题三条都对不上）→ 脚本按设计回退为"不隐藏"抓屏，并在界面给出可见提示。检查 `dshPid` / `dshImage` / `dshTitleHint` |
@@ -257,11 +284,11 @@ node lib/prune-onnx-runtime.mjs --apply    # 真删：288MB → 65MB（win-x64�
   - **两种切法等价**：右键菜单（顺手切）与 **DSH 插件页里本插件的「截图模式」下拉框**（`插件 → dsh-screenshot-xn → 截图模式`，和语音输入插件的「识别服务 / 识别语言」同一套机制，用的是原生 `<select>`）写的是同一份配置；插件页改完**立即生效、无需重启**（该字段声明为 `volatile`，加载器会就地更新运行中的值），DSH 重启后也仍是上次选的值。
   - **改了就一定用得上（t74c）**：插件页控件选完会**立刻**写进共享会话状态，并且 `startShot()` 在抓屏**前**会再跟宿主对一次 —— 不管模式是从右键菜单、插件页、别的窗口还是手改 patch 改的，**下一次截图都用最新值**。修之前的表现是"插件页能切，但截图仍按右键菜单那次旧选择来"（插件页是另一棵 React 树，只写了宿主配置，没人更新客户端内存那份）。
 - **主路径 = 独立全屏截图面板（B1）**：点按钮 / `Alt+A` → `POST /overlay/start?mode=…`：宿主**按当前模式抓一帧**（穿透＝先隐藏 DSH 再抓、抓完恢复；普通＝直接抓），随即用系统浏览器拉起 **kiosk 全屏窗口**（覆盖整屏含任务栏）打开面板页面 → 面板里框选、标注 → 点「插入对话／复制／另存为」→ 面板把「动作名 + 只含选区与标注的 PNG」交回宿主、自己关闭 → **动作在 DSH 侧执行**（插入走已验证的 paste 桥接、复制写系统剪贴板、另存为弹系统对话框），并给出轻提示、焦点回输入框。
-  - 面板可用性判定在抓屏**之前**：机器上没有 Edge/Chrome 时 `start` 直接回答 `no-browser`（不隐藏、不抓屏），界面给可见提示并回退。
+  - 面板可用性判定在抓屏**之前**：机器上没有 Edge/Chrome 时 `start` 直接回答 `no-browser`；DSH Desktop 没放行普通浏览器访问时回答 `desktop-browser-access-denied`（判据是预检面板页拿到 `403` 且正文恰为 `forbidden`）。两种都**不隐藏窗口、不抓屏**，界面给可见提示并回退到 DSH 内覆盖层。
   - `Esc` / 右键 / 框选小于 8 px：面板关闭，**不产图**、不写剪贴板、不动草稿（B-4/B-5），DSH 侧给一条中性提示。
   - 取消以外的异常结束（面板被直接关掉 → `aborted`、超过 `overlayTimeoutMs` → `timeout`、宿主失联 → `unreachable`）都会给出**可见错误提示**，可重试，不会永久忙态。
   - 慢与卡死可区分：DSH 侧按钮在会话期间是忙态（禁用 + 进度光标 + `aria-busy`）。
-- **回退路径 = DSH 内覆盖层**（`shell.overlay`，条目自设 `pointer-events`）：面板不可用时（无浏览器 / 宿主未加载 overlay 路由 / `start` 失败）**自动**走它，并在界面写明"已改用 DSH 内截图"，**同样按当前模式**抓屏（`startCapture(runtime, through)`）；这条路径就是上一轮的完整实现（抓屏 → DSH 窗口内冻结帧 → 框选 → 标注 → 三种输出），功能不缺失。
+- **回退路径 = DSH 内覆盖层**（`shell.overlay`，条目自设 `pointer-events`）：面板不可用时（无浏览器 / **DSH Desktop 未放行普通浏览器访问，即默认状态** / 宿主未加载 overlay 路由 / `start` 失败）**自动**走它，并在界面写明"已改用 DSH 内截图"，**同样按当前模式**抓屏（`startCapture(runtime, through)`）；这条路径就是上一轮的完整实现（抓屏 → DSH 窗口内冻结帧 → 框选 → 标注 → 三种输出），功能不缺失。
 - **框选**：拖拽出矩形，区域内原色、区域外变暗；实时显示"宽 × 高"与十字辅助线；松开后出现选区与工具栏。选区宽或高 < 8 px 视为无效：本次截图取消，不产生图片、不写剪贴板（B-5）。
 - **微调**：8 个把手改大小（对边固定）、拖动选区内部平移。
 - **工具栏（t65/t66/t68）**：**所有按钮都是图标按钮**（悬停出名字，`title` + `aria-label`），**固定两行**（不靠自动折行 —— 折点随机、长短不齐很难看）：
@@ -296,7 +323,7 @@ node lib/prune-onnx-runtime.mjs --apply    # 真删：288MB → 65MB（win-x64�
 ## 局限
 
 1. **只支持主屏（单屏约定，E-2）**：抓屏与面板都按主屏处理，双屏/多屏环境下不会跨屏拼接（跨屏属 P2，本轮不做）；`npm run capture:probe` 会报告 `capture_bounds`、`virtual_screen`、`screen_count` 与 `single_screen`；多屏时宿主日志会多一行"capturing the primary screen only"。
-2. **面板需要一个系统浏览器（Edge / Chrome）**：kiosk 窗口由它的可执行文件承载（默认候选见配置表）。没有浏览器就回退 DSH 内覆盖层——那条路径的画面**在 DSH 窗口内**，被 DSH 遮住的桌面内容截不到（B1 主路径没有这个问题，因为抓屏时 DSH 已隐藏）。
+2. **面板需要两个前提：一个系统浏览器（Edge / Chrome），以及 DSH Desktop 放行普通浏览器访问**。kiosk 窗口由浏览器的可执行文件承载（默认候选见配置表）；而 DSH Desktop 默认**不允许**普通浏览器访问它自己的端口（`openBrowser` 默认 `false`），面板页会被闸门拒成 `403 forbidden`。两个前提缺任一个就回退 DSH 内覆盖层——那条路径的画面**在 DSH 窗口内**，被 DSH 遮住的桌面内容截不到（B1 主路径没有这个问题，因为抓屏时 DSH 已隐藏）。放行方式见「安装」的前置开关。
 3. **`ALT+A` 是应用内快捷键，只在 DSH 窗口聚焦时生效**：宿主侧全局热键（PRD F-04/C-1）本轮不做——插件宿主够不到 Electron 的 `globalShortcut`，注册系统级热键需要常驻进程/原生模块，用户已确认"不做常驻进程"。因此 `ALT+A` 走的是页面 `keydown`，**焦点不在 DSH 时按无效**（面板打开期间 DSH 在后面，按了也不会重复触发）；它与部分输入法/系统快捷键可能冲突（冲突时以 DSH 内输入框的表现为准）。
 4. **>4 MB 自动降级（F-23 / D-8）**：优先输出无损 PNG；超过 4 MB 时先按逻辑分辨率下采样，仍超则转 WebP 有损。降级为 WebP 时产物标签同步跟随实际编码格式（`lib/output.mjs` 的 `formatOf`）；阈值与降级方式可配置（`lib/capture-plan.mjs` 的 `DEFAULT_SIZE_POLICY`）。面板侧用的是同一份策略，因此面板交回的字节已经是按策略处理过的结果。
 5. **缩放比 125% / 150% / 200%（D-3）**：抓屏脚本以 per-monitor-v2 DPI 感知运行，位图应为物理像素（`capture:probe` 的 `scale` 应为 1）。面板页的 1:1 是"**屏幕物理像素 : 画布位图 : 冻结帧像素**"三者对齐：画布位图尺寸 = 冻结帧像素，画布的 CSS 尺寸 = 视口，冻结帧层用恒等变换绘制（t64 起；此前它误用了标注层的 CSS→设备比例，视口 ≠ 帧尺寸时会把整屏裁成左上角放大图，见 `tests/overlay-page.test.mjs` 的 1:1 契约与负样本 8）。kiosk 满屏 + 显示缩放 100% 时视口 CSS 宽 = 帧像素宽（本机实测：3440×1440，`AppliedDPI=96`），三者严格 1:1；**若把 kiosk 改成窗口化、或改显示缩放/浏览器缩放**，页面的映射前提就不成立（属已知边界，不在本轮范围内）。
