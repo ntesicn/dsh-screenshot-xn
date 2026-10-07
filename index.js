@@ -146,6 +146,16 @@ export const OVERLAY_PING_PATH = `${OVERLAY_PREFIX}/ping`;
 export const OVERLAY_WATCHDOG_MS = 500;
 /** Default heartbeat window: this much silence marks the session aborted. */
 export const DEFAULT_OVERLAY_HEARTBEAT_MS = 5_000;
+/**
+ * Window for the **first** heartbeat of a session (t80).
+ *
+ * Every session spawns the browser with a brand-new `--user-data-dir`, so the first paint is
+ * always a cold start — a slow machine can spend longer than the steady-state heartbeat window
+ * before the page runs at all, and the session used to be aborted before it ever had a chance
+ * to ping (observed: ten sessions in a row, all `no heartbeat for ~5.1 s`). Silence *after* the
+ * first ping still uses {@link DEFAULT_OVERLAY_HEARTBEAT_MS}. The session ceiling still applies.
+ */
+export const OVERLAY_FIRST_PING_MS = 20_000;
 /** Default ceiling for one overlay session (a long annotation session fits). */
 export const DEFAULT_OVERLAY_TIMEOUT_MS = 120_000;
 /** How long a finished session keeps frame/result so the client can fetch them. */
@@ -236,6 +246,10 @@ export const OVERLAY_KIOSK_FLAGS = Object.freeze([
   '--disable-sync',
   '--no-service-autorun',
   '--disable-features=msEdgeFirstRunExperience,msImplicitSignin',
+  // t80：面板永远是回环地址（`http://127.0.0.1:<DSH 端口>/…`），页面也不再从任何远端取资源。
+  // 机器上装了系统代理时（WinINET `ProxyEnable=1`），代理会替 127.0.0.1 作答，面板就变成
+  // 白屏或错误页 —— 宿主这边只表现为"没有心跳"，看不出真实原因。
+  '--no-proxy-server',
 ]);
 
 /** Failure carrying a short machine-readable detail code for the log line. */
@@ -1608,13 +1622,22 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
     scheduleRelease(session);
   }
 
+  /** Page URL with the session token masked, for log lines. */
+  function maskOverlayToken(url) {
+    return typeof url === 'string' ? url.replace(/token=[^&]*/u, 'token=****') : String(url);
+  }
+
   /** One watchdog beat: heartbeat silence, session ceiling, dead kiosk process. */
   function tick() {
     if (session === null || session.state !== 'running') return;
     const now = Date.now();
     const silence = now - session.lastPingAt;
-    if (silence > settings.overlayHeartbeatMs) {
-      finish('aborted', `no heartbeat for ${silence} ms`);
+    // t80：首次心跳给冷启动留出更长的窗口；页面一旦发过心跳，就回到常规心跳窗口。
+    const window = session.pings === 0 ? OVERLAY_FIRST_PING_MS : settings.overlayHeartbeatMs;
+    if (silence > window) {
+      finish('aborted', session.pings === 0
+        ? `no heartbeat for ${silence} ms: the kiosk page never pinged (${maskOverlayToken(session.pageUrl)})`
+        : `no heartbeat for ${silence} ms`);
       return;
     }
     if (now - session.startedAt > settings.overlayTimeoutMs) {
@@ -1719,6 +1742,8 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
       pid: child.pid,
       child,
       lastPingAt: Date.now(),
+      pings: 0,
+      pageUrl,
       sawAlive: false,
       finishedAt: null,
       retainUntil: 0,
@@ -1750,7 +1775,10 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
     ping(token) {
       const target = sessionFor(token);
       if (target === undefined) return undefined;
-      if (target.state === 'running') target.lastPingAt = Date.now();
+      if (target.state === 'running') {
+        target.lastPingAt = Date.now();
+        target.pings += 1;
+      }
       return target;
     },
     /**

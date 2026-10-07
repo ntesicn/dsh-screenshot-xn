@@ -257,10 +257,11 @@ node lib/prune-onnx-runtime.mjs --apply    # 真删：288MB → 65MB（win-x64�
 | 点截图后提示「独立截图面板不可用…（overlay.start http 404）」 | 宿主半还是旧版（没有 overlay 路由）：**重启 DSH Desktop**。本次截图已经自动回退到 DSH 内覆盖层流程，功能不缺失 |
 | 点截图后提示「未找到可用的浏览器（Edge / Chrome）…」 | 机器上没有 Edge/Chrome，或 `overlayBrowserPaths` 指错了：面板无法全屏承载，本次截图自动回退到 DSH 内覆盖层流程 |
 | 点截图后提示「DSH Desktop 挡住了独立截图面板（…403 forbidden）…」 | **这是默认状态，不是故障**：DSH Desktop 的 webServer 默认只放行带渲染器令牌的请求，普通浏览器（kiosk 窗口）访问面板页一律得到 `403` + 正文 `forbidden`（`lib/webserver.js` 的 `permits()` → `decideDesktopBrowserAccess`，`openBrowser` 默认 `false`）。插件在抓屏前预检到这一条，**本次截图已自动回退**到 DSH 内覆盖层流程。想要完整的整屏面板：**设置 → 「浏览器与局域网」→ 勾选「允许在浏览器中打开」**（该开关只在兼容模式下可用），或在当前 profile 的 `cordis.patch.yml` 里给 `desktop-shell` 那行加 `openBrowser: true`，然后**重启 DSH Desktop**。细节见「安装」里的前置开关 |
+| 开关已经开了，点截图却**什么都不出来**，DSH 日志里是 `overlay aborted: no heartbeat for … ms: the kiosk page never pinged (…)` | 闸门已经放行（预检没报 `403`），是**浏览器那一侧没把面板页渲染出来**：kiosk 进程起来了（日志里 `stopped=true killed=false`，不是崩溃），但一次心跳都没发。两个已知原因（t80 都已修）：① **机器上有系统代理**（`ProxyEnable=1`，`ProxyServer` 指向本机端口）——代理替 `127.0.0.1` 作答，面板就成了白屏/错误页，而宿主看不出区别 → kiosk 现在带 `--no-proxy-server`；② 每次会话都用**全新的 `--user-data-dir`**，慢机器上的冷启动可能超过心跳窗口 → 现在**首次心跳**给 20 s（`OVERLAY_FIRST_PING_MS`）。若仍是这一条：**手动**在 Edge/Chrome 里打开日志里括号里那条面板 URL 对照——`/overlay/page`、`/asset/overlay.js`、`/asset/overlay.css`、`/lib/geometry.mjs` 都应返回 `200`，任何一个 `404` 说明插件目录本身不完整（重装插件后**重启 DSH Desktop**） |
 | 点截图后一直转圈 / 提示"抓屏失败" | 宿主抓屏路由没通。先在浏览器 fetch `/api/dsh-screenshot/capture` 看返回：`404` 表示路由未注册（插件未激活或 `webServer` 服务缺席，看 DSH 日志里 `[dsh-screenshot]` 行）；`502` 表示脚本失败，`message` 里带 `capture.*` 细分码（`capture.script-missing`＝`scriptPath` 指错、`capture.timeout`＝超时、`capture.spawn-failed`＝powershell 找不到） |
 | 点截图后 `502` 且 `message` 含 `capture.timeout` | 单次抓屏超过 `timeoutMs`。先把 `timeoutMs` 调大；若仍超时，手动执行 `npm run capture:probe` 观察耗时（本机实测：脚本自身抓屏 73 ms、含保存 155 ms；Node 拉起进程后端到端约 560 ms） |
 | 面板出现了，但 DSH 窗口仍然出现在画面里 | 宿主没能确认"这是 DSH 的窗口"（pid/映像名/标题三条都对不上）→ 脚本按设计回退为"不隐藏"抓屏，并在界面给出可见提示。检查 `dshPid` / `dshImage` / `dshTitleHint` |
-| 面板卡住不动，或提交后一直没回 DSH | 面板页面每 1 s 发一次心跳，超过 `overlayHeartbeatMs` 没消息宿主会判 `aborted` 并关掉窗口，DSH 侧给出可见提示（可重试）；会话总上限是 `overlayTimeoutMs` |
+| 面板卡住不动，或提交后一直没回 DSH | 面板页面每 1 s 发一次心跳。**第一次心跳之前**宿主给 20 s 冷启动窗口（`OVERLAY_FIRST_PING_MS`，t80：每次会话都是全新 `--user-data-dir`，慢机器首绘可能超过常规窗口），之后超过 `overlayHeartbeatMs` 没消息宿主就判 `aborted` 并关掉窗口，DSH 侧给出可见提示（可重试）；会话总上限是 `overlayTimeoutMs` |
 | 面板提交后 DSH 里没有插入 | 插入走官方 paste 桥接（`useInput` 的附件数必须增加才算成功）；桥接不可用时会**真实降级**为"复制到剪贴板 + 提示手动 Ctrl+V"，不会静默。看控制台 `[dsh-screenshot] paste bridge …` 行 |
 | 路由 `404` | `webServer` 未激活（极简 profile）时插件只记一条日志、不注册路由，这是设计如此（插件不会拖垮启动）。换回带 Web 载体的 profile 即可 |
 | 坐标对不上（框选区域与粘贴图不一致） | 面板是**整屏 1:1**：页面按"位图尺寸 = 冻结帧像素、CSS 尺寸 = 视口尺寸"绘制，框选坐标即屏幕坐标。若真的出现偏移，先确认抓屏是 DPI-aware（`npm run capture:probe` 输出的 `dpi_awareness` 应含 `=True`，`scale` 应为 1），并附面板控制台的 `[dsh-screenshot] overlay mapping` 日志 |
@@ -334,6 +335,7 @@ node lib/prune-onnx-runtime.mjs --apply    # 真删：288MB → 65MB（win-x64�
 10. **仅 Windows**：抓屏走 PowerShell + `System.Drawing`；识别走 Windows 自带的 `Windows.Media.Ocr`（同样 Windows 专属）。其它平台插件不注册路由（只记一条日志）。
 11. **识别读的是原图，不含标注（t75 的刻意选择）**：待识别区域直接从冻结帧裁下来，你画的矩形/椭圆/箭头/画笔/文字都**不会**进识别结果。好处是"在文字上画个框再识别"不会被自己的标注污染；代价是"想连标注一起识别"做不到（那本来也不是识别该做的事）。
 12. **翻译要花你自己的 token**：翻译会用 DSH 当前默认模型发一次文本调用（`translateEnabled` 可关）。识别完全是本地的、不花钱。
+13. **kiosk 每次都是冷启动，首次心跳最多等 20 s（t80）**：每个会话都用一个**全新**的 `--user-data-dir`（`%TEMP%\dsh-screenshot-xn-overlay-<token>`，会话结束即删，不留残留），好处是互不干扰、不留配置，代价是每次都要重新初始化浏览器 profile。因此宿主把**第一次**心跳的窗口放宽到 20 s（`OVERLAY_FIRST_PING_MS`），页面一旦开始发心跳就回到常规的 `overlayHeartbeatMs`。极端情况下（面板页始终没渲染出来，例如被机器上的系统代理挡住）你要等到 20 s 才会看到失败提示——kiosk 进程此时是活着的，可以直接 `Alt+F4` 关掉它。
 13. **单次识别是"一屏文字"的量级**：待翻译文本上限 8000 字符（超出按行截断并在卡片上标注"文本过长"），区域边长上限 4096 设备像素（超出等比缩小）。整屏文字识别没问题，但这不是给"整本书"用的。
 14. **只识别主屏区域（与第 1 条同源）**：冻结帧只覆盖主屏，所以跨屏选区不存在。
 15. **识别与翻译只在独立面板里（t75 的这一轮范围）**：DSH 内覆盖层（第 2 条那条回退路径）**没有**这两个按钮 —— 它是"机器上没有 Edge/Chrome"时的降级通道，画面还在 DSH 窗口内。真机上的主路径是面板（本机实测 Edge 在装）。要在回退路径上也有，说一声；`lib/ocr.mjs` 与宿主那三条路由已经是两侧共用的一份，接上去主要是加两个按钮和一张卡片的客户端工作。
