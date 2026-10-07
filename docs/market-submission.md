@@ -8,7 +8,7 @@
 | 门槛 | 我们的状态 |
 | --- | --- |
 | 仓库 `package.json` 声明 **`dsh.bundle`**（只声明 `dsh.client` 是最常见的被拒原因） | ✅ `dsh.bundle.patch: ./cordis.patch.yml`，且 `cordis.patch.yml` 在仓库根 |
-| 仓库里有**真实可用的代码**（占位/纯 README 不收） | ✅ 189 个离线用例 + e2e/负样本脚本 |
+| 仓库里有**真实可用的代码**（占位/纯 README 不收） | ✅ 195 个离线用例 + e2e/负样本脚本 |
 | 仓库**创建满 1 天** | ✅ 仓库建于 2026-10-02，已满 |
 
 ## 已提交的内容
@@ -28,13 +28,15 @@ category: vision
 description:
   en: 'Full-screen screenshot panel for the DSH composer: ...'   # 661 字符，见文件
   zh: 'DSH 输入框旁的整屏截图面板：...'                            # 245 字符，见文件
-tarball: https://github.com/ntesicn/dsh-screenshot-xn/releases/download/v1.0.1/dsh-screenshot-xn-1.0.1.tgz
+tarball: https://github.com/ntesicn/dsh-screenshot-xn/releases/latest/download/dsh-screenshot-xn.tgz
 ```
 
 - `category` 用 `vision`（官方合法取值之一）。截图工具原本也可填 `ui`；选不准不会被打回，维护者会直接改。
 - `owner__repo` 的下划线是**两个**，文件名必须与仓库名一致。
 - 描述含 `: ` 时必须加引号；`zh` 里所以用全角冒号规避。
-- `tarball:` 指向本仓库已发布的 Release 资产，必须是 GitHub Release 托管的 https `.tgz`。
+- `tarball:` 指向本仓库已发布的 Release 资产，必须是 GitHub Release 托管的 https `.tgz`。贡献指南
+  （`contributing.md:116-128`）给出两种等价格式：钉版 `releases/download/v1.2.0/name-1.2.0.tgz`，或
+  稳定名 `releases/latest/download/name.tgz`；**我们用后者**，于是以后发版不必再动条目（见「发版流程」）。
 - 描述必须**属实**、无营销词与最高级 —— 维护者会读目标仓库源码逐条核对。
 
 ## 编码事故（已修复）
@@ -92,7 +94,7 @@ CI 绿灯只是前置条件；维护者会读源码核对描述与分类，并�
 | 项 | 状态 |
 | --- | --- |
 | 公开仓库 | ✅ <https://github.com/ntesicn/dsh-screenshot-xn>（`main`，`dsh.bundle` + `cordis.patch.yml` 就位） |
-| 预构建 Release | ✅ <https://github.com/ntesicn/dsh-screenshot-xn/releases/tag/v1.0.1>（资产 `dsh-screenshot-xn-1.0.1.tgz`，287776 字节；`v1.0.0` 亦在） |
+| 预构建 Release | ✅ <https://github.com/ntesicn/dsh-screenshot-xn/releases/tag/v1.1.0>（资产 `dsh-screenshot-xn-1.1.0.tgz` 387680 字节 / 34 个文件，外加稳定名 `dsh-screenshot-xn.tgz`；`v1.0.1`、`v1.0.0` 亦在） |
 | 市场截图 | ✅ `screenshots.json` + `assets/shot-*.png` |
 | 提 PR 收录 | ✅ PR #6538 已开，等维护者 review / 合并 |
 | npm 发布 | ⬜ 需要在能访问 npm 的网络/终端里 `npm adduser`（见下），然后 `npm publish` |
@@ -113,10 +115,27 @@ CI 绿灯只是前置条件；维护者会读源码核对描述与分类，并�
   登录成功后 token 会写进 `~/.npmrc`，之后直接 `npm publish` 即可（`package.json` 里的
   `publishConfig` 已把 registry 钉到官方源，避免本机默认的淘宝镜像把发布请求打回去）。
 
+## 发版流程（每次都一样）
+
+1. 改 `package.json` 的 `version`，提交（`Release X.Y.Z: ...`）并 `git push origin main`。
+2. 打包：`npm pack --pack-destination ../dist` → `dsh-screenshot-xn-X.Y.Z.tgz`；再把同一份字节复制成稳定名
+   `dsh-screenshot-xn.tgz`（市场条目用的固定地址）。
+3. 建 Release，**两个资产都上传**：`dsh-screenshot-xn-X.Y.Z.tgz`（仓库惯例，与 v1.0.0/v1.0.1 一致）与稳定名
+   `dsh-screenshot-xn.tgz`。走 API：
+   `POST /repos/ntesicn/dsh-screenshot-xn/releases`（`tag_name: "vX.Y.Z"`、`target_commitish: "main"`），
+   再 `POST https://uploads.github.com/repos/ntesicn/dsh-screenshot-xn/releases/<id>/assets?name=<文件名>`
+   （`Content-Type: application/gzip`，二进制直传）。Release 正文沿用「`## 版本` + 每条中英对照 + 安装小节」的格式。
+4. 核对：`https://github.com/ntesicn/dsh-screenshot-xn/releases/latest/download/dsh-screenshot-xn.tgz`
+   返回 `200` 且字节数与本地一致。
+5. **市场条目不用改**（条目指向 `latest/download/` 的稳定名）；只有从钉版格式切到稳定名时改一次。
+   改了条目就推到 PR 分支，PR 自动更新，CI 会重跑。
+6. 用户侧拿到新版：插件仓库 `git pull` + **重启 DSH Desktop**（宿主半只在进程启动时加载）。
+   npm 发布是可选的另一条路（见上），条目里不要写 `npm:` 字段。
+
 ## 本地打包
 
 ```sh
-npm pack --pack-destination ../dist     # 产出 dsh-screenshot-xn-1.0.1.tgz（约 0.28MB，只含白名单文件）
+npm pack --pack-destination ../dist     # 1.1.0 实测：387680 字节 / 34 个文件（1.0.1 是 33 个 / 287776 字节）
 ```
 
 包里**不含** ONNX 模型与 `node_modules`：模型在首次使用 OCR 时按需下载并校验 SHA256（`lib/ocr-models.mjs`）。
