@@ -39,7 +39,7 @@
  */
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
@@ -156,6 +156,19 @@ export const DEFAULT_OVERLAY_HEARTBEAT_MS = 5_000;
  * first ping still uses {@link DEFAULT_OVERLAY_HEARTBEAT_MS}. The session ceiling still applies.
  */
 export const OVERLAY_FIRST_PING_MS = 20_000;
+/**
+ * Distinct static panel files remembered for the "the kiosk page never pinged" log line (t80).
+ *
+ * The static family (`/overlay/page`, `/overlay/asset/*`, `/overlay/lib/*.mjs`) is fetched by the
+ * kiosk browser alone — the DSH side only polls `/overlay/status` — so a count of zero means the
+ * browser never asked this server for the panel at all, which is a different failure from "the
+ * page arrived but its script never ran".
+ */
+export const OVERLAY_STATIC_SEEN_LIMIT = 12;
+/** Lines of the kiosk browser's own log copied into the host log when the page never pinged (t80). */
+export const OVERLAY_KIOSK_LOG_LINES = 20;
+/** File the kiosk browser writes its own diagnostics to, inside the throwaway profile (t80). */
+export const OVERLAY_KIOSK_LOG_NAME = 'chrome_debug.log';
 /** Default ceiling for one overlay session (a long annotation session fits). */
 export const DEFAULT_OVERLAY_TIMEOUT_MS = 120_000;
 /** How long a finished session keeps frame/result so the client can fetch them. */
@@ -583,6 +596,7 @@ function registerRoute(ctx, settings, service = undefined, modeBridge = undefine
       return () => {};
     }
     log(ctx, 'info', `routes ready: ${ROUTE_KIND} ${ROUTE_PATH} + prefix ${OVERLAY_PREFIX} + ${STATE_PATH}`);
+    reportOverlayAssets(ctx, overlay);
     return async () => {
       for (const dispose of [...disposers].reverse()) {
         try {
@@ -1555,8 +1569,27 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
     const executable = await resolveBrowser();
     if (executable === undefined) return undefined;
     const userDataDir = join(tmpdir(), `dsh-screenshot-xn-overlay-${token}`);
-    const argv = [executable, ...OVERLAY_KIOSK_FLAGS.slice(0, 1), pageUrl, ...OVERLAY_KIOSK_FLAGS.slice(1), `--user-data-dir=${userDataDir}`];
-    return { argv, description: basename(executable), userDataDir };
+    const debugLogPath = join(userDataDir, OVERLAY_KIOSK_LOG_NAME);
+    try {
+      // t80：先把 profile 目录建好，`--log-file` 才有地方落笔（Chromium 自己建目录更晚）。
+      mkdirSync(userDataDir, { recursive: true });
+    } catch (error) {
+      log(ctx, 'debug', `overlay browser profile not pre-created: ${message(error)}`);
+    }
+    const argv = [
+      executable,
+      ...OVERLAY_KIOSK_FLAGS,
+      // t80：让浏览器把自己的话说出来。页面一次心跳都没有时，只有这份日志能分开
+      // "浏览器根本没打开这个 URL"（代理 / 策略 / 没解析）和"页面脚本没跑起来"。
+      '--enable-logging',
+      `--log-file=${debugLogPath}`,
+      `--user-data-dir=${userDataDir}`,
+      // t80：URL 永远是**最后一个**参数。开关散在 URL 两侧时，哪些开关真的生效取决于
+      // 浏览器的解析顺序（仓库自己的浏览器探针也一律把 URL 放在最后）。这次要修的恰好
+      // 是"开关没生效"，不能让修理手段本身再踩在这个不确定性上。
+      pageUrl,
+    ];
+    return { argv, description: basename(executable), userDataDir, debugLogPath };
   }
 
   /** Stop the kiosk window: ask it to close first, kill only if it refuses. */
@@ -1627,6 +1660,36 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
     return typeof url === 'string' ? url.replace(/token=[^&]*/u, 'token=****') : String(url);
   }
 
+  /**
+   * Copy the kiosk browser's own log into the host log when the page never pinged (t80).
+   *
+   * This is the only record of what the browser made of the URL: a system proxy answering for
+   * `127.0.0.1`, an unusable `--user-data-dir`, or a navigation that never happened all show up
+   * here and nowhere else. An unreadable file is itself the answer (the browser never started),
+   * and nothing here may change the session outcome.
+   * @param {any} target - the session being aborted.
+   * @returns {void}
+   */
+  function reportKioskLog(target) {
+    const file = target.debugLogPath;
+    if (typeof file !== 'string' || file === '') return;
+    let text;
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      log(ctx, 'warn', `overlay kiosk left no browser log at ${file}: the browser may never have started`);
+      return;
+    }
+    const lines = text.split(/\r?\n/u).filter((line) => line.trim() !== '');
+    if (lines.length === 0) {
+      log(ctx, 'warn', `overlay kiosk browser log is empty (${file})`);
+      return;
+    }
+    const tail = lines.slice(-OVERLAY_KIOSK_LOG_LINES);
+    log(ctx, 'warn', `overlay kiosk browser log: last ${String(tail.length)} of ${String(lines.length)} lines from ${file}`);
+    for (const line of tail) log(ctx, 'warn', `  kiosk> ${line.length > 300 ? `${line.slice(0, 300)}…` : line}`);
+  }
+
   /** One watchdog beat: heartbeat silence, session ceiling, dead kiosk process. */
   function tick() {
     if (session === null || session.state !== 'running') return;
@@ -1635,9 +1698,15 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
     // t80：首次心跳给冷启动留出更长的窗口；页面一旦发过心跳，就回到常规心跳窗口。
     const window = session.pings === 0 ? OVERLAY_FIRST_PING_MS : settings.overlayHeartbeatMs;
     if (silence > window) {
-      finish('aborted', session.pings === 0
-        ? `no heartbeat for ${silence} ms: the kiosk page never pinged (${maskOverlayToken(session.pageUrl)})`
-        : `no heartbeat for ${silence} ms`);
+      if (session.pings === 0) {
+        // 面板文件被取走的次数是这里唯一能分开两类故障的证据：0 次说明浏览器根本没打开
+        // 这个 URL（代理 / 策略 / 浏览器自身），取过页面却仍无心跳说明脚本没跑起来。
+        const fetched = session.staticSeen.length === 0 ? 'none' : session.staticSeen.join(', ');
+        reportKioskLog(session);
+        finish('aborted', `no heartbeat for ${silence} ms: the kiosk page never pinged (${maskOverlayToken(session.pageUrl)}); panel files fetched: ${String(session.staticHits)} (${fetched})`);
+        return;
+      }
+      finish('aborted', `no heartbeat for ${silence} ms`);
       return;
     }
     if (now - session.startedAt > settings.overlayTimeoutMs) {
@@ -1743,6 +1812,10 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
       child,
       lastPingAt: Date.now(),
       pings: 0,
+      // t80：浏览器到底有没有来取面板的静态文件（只有 kiosk 会取，DSH 侧只轮询 /status）。
+      staticHits: 0,
+      staticSeen: [],
+      debugLogPath: launch.debugLogPath,
       pageUrl,
       sawAlive: false,
       finishedAt: null,
@@ -1780,6 +1853,19 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
         target.pings += 1;
       }
       return target;
+    },
+    /**
+     * Record that the browser fetched one of the panel's static files (t80).
+     * @param {string} hit - short label (`page`, `asset:overlay.css`, `lib:geometry.mjs`, …).
+     * @returns {void}
+     */
+    noteStatic(hit) {
+      if (session === null || session.state !== 'running') return;
+      session.staticHits += 1;
+      const label = typeof hit === 'string' && hit !== '' ? hit : 'unknown';
+      if (session.staticSeen.length < OVERLAY_STATIC_SEEN_LIMIT && !session.staticSeen.includes(label)) {
+        session.staticSeen.push(label);
+      }
     },
     /**
      * Accept a result from the overlay.
@@ -1865,6 +1951,8 @@ async function handleOverlay(req, res, ctx, overlay, text = undefined) {
     // （白底 + 页面里那行静态提示文字 + 一个裸 input），脚本一行都没跑 → 没有心跳 →
     // 5 s 后会话 aborted。这三个分支不含任何用户数据（就是包里的文件），无需 token。
     if (path === OVERLAY_PAGE_PATH) {
+      // t80：先记账再判断方法——"浏览器来过"本身就是这次会话最缺的证据。
+      overlay.noteStatic?.('page');
       if (method !== 'GET') {
         sendJson(res, 405, { ok: false, error: 'method.not_allowed' }, { Allow: 'GET' });
         return;
@@ -1874,11 +1962,13 @@ async function handleOverlay(req, res, ctx, overlay, text = undefined) {
     }
     if (path.startsWith(OVERLAY_ASSET_PREFIX)) {
       const name = path.slice(OVERLAY_ASSET_PREFIX.length);
+      overlay.noteStatic?.(`asset:${name}`);
       sendStaticFile(res, overlay.assetPath(name), contentTypeFor(name), 'overlay.asset-missing', ctx, name);
       return;
     }
     if (path.startsWith(OVERLAY_LIB_PREFIX)) {
       const name = path.slice(OVERLAY_LIB_PREFIX.length);
+      overlay.noteStatic?.(`lib:${name}`);
       if (!name.endsWith('.mjs')) {
         sendJson(res, 404, { ok: false, error: 'overlay.lib-missing' });
         return;
@@ -2089,6 +2179,36 @@ function contentTypeFor(name) {
  * @param {string} [label] - short name for that log line.
  * @returns {void}
  */
+/**
+ * Write down where the panel files are and whether they are actually there (t80).
+ *
+ * A panel that never opens has two very different causes — the files were not installed, or the
+ * browser never asked for them — and the startup log is the only place the first one shows up.
+ * Diagnostics must never break plugin startup, so every failure here is swallowed.
+ * @param {any} ctx - plugin context (for the logger).
+ * @param {any} overlay - the overlay host (owns page/asset/lib path resolution).
+ * @returns {void}
+ */
+function reportOverlayAssets(ctx, overlay) {
+  try {
+    const page = overlay.pagePath();
+    const script = overlay.assetPath('overlay.js');
+    const style = overlay.assetPath('overlay.css');
+    const libDir = dirname(overlay.libPath('geometry.mjs'));
+    let modules = -1;
+    try {
+      modules = readdirSync(libDir).filter((name) => name.endsWith('.mjs')).length;
+    } catch {
+      /* the directory is missing entirely; -1 reports exactly that */
+    }
+    const mark = (file) => (existsSync(file) ? 'ok' : 'MISSING');
+    log(ctx, 'info', `overlay assets: page ${mark(page)} ${page}, script ${mark(script)} ${script}, style ${mark(style)} ${style}, lib ${modules < 0 ? 'MISSING' : `${String(modules)} modules`} ${libDir}`);
+    log(ctx, 'info', `overlay kiosk flags: ${OVERLAY_KIOSK_FLAGS.join(' ')} + --enable-logging --log-file=<profile>/${OVERLAY_KIOSK_LOG_NAME} --user-data-dir=<profile>`);
+  } catch (error) {
+    log(ctx, 'warn', `overlay asset report failed: ${message(error)}`);
+  }
+}
+
 function sendStaticFile(res, absolutePath, contentType, missingCode, ctx = undefined, label = '') {
   if (absolutePath === undefined) {
     sendJson(res, 400, { ok: false, error: 'overlay.bad-path' });
