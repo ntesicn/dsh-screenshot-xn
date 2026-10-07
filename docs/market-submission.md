@@ -78,14 +78,21 @@ node E:/dshplugins/.market/validate.cjs
 ```
 
 校验条目键名合法、`en`/`zh` 均以句号结尾、`category` 在白名单、`tarball` 匹配
-`^https://github\.com/.+/releases/download/.+/.*\.tgz$`（用 `js-yaml` 解析 `E:/dshplugins/.market/ntesicn__dsh-screenshot-xn.yml`）。
+`^https://github\.com/.+/releases/(?:latest/)?download/.+\.tgz$`（两种合法形态：钉版
+`download/v1.2.0/name-1.2.0.tgz` 与稳定名 `latest/download/name.tgz`，见 `contributing.md:116-128`；
+用 `js-yaml` 解析 `E:/dshplugins/.market/ntesicn__dsh-screenshot-xn.yml`）。
 
 ## CI
 
 | 检查 | 结果 |
 | --- | --- |
 | `Submission gate` | ✅ 首个提交 `2fb4338` 通过：`dsh.bundle` declared, repo old enough, enough commits |
-| `check` | ✅ 修复提交 `dc3987e` 上通过（`success`）；此时 PR `mergeable_state = clean`、2 commits / +7 −0 |
+| `check` | ✅ 修复提交 `dc3987e` 上通过（`success`）；当时 PR `mergeable_state = clean`、2 commits / +7 −0 |
+| `check` + `Submission gate` | ✅ 换稳定名后 head = `bfbcb50`（4 commits / +7 −0）两项均 `success`（`check` 耗时约 8.5 分钟，与上一次同量级），PR `mergeable_state = clean` |
+
+**推送目标**：这个 clone 有两个远端 —— `origin` 是**上游** `awesome-dsh-plugin/awesome-dsh-plugin`，
+`fork` 才是自己的 `ntesicn/awesome-dsh-plugin`。**必须 `git push fork add-ntesicn-dsh-screenshot-xn`**；
+推 `origin`（也就是不加远端名的裸 `git push`）会得到 `remote: Permission to awesome-dsh-plugin/awesome-dsh-plugin.git denied to ntesicn` + `403`，那只是权限，不是网络问题。
 
 CI 绿灯只是前置条件；维护者会读源码核对描述与分类，并检查 PR 是否动了无关条目。反馈以 PR 评论给出，改完推到同一分支即可。
 
