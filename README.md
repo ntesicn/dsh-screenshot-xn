@@ -94,12 +94,18 @@
    >
    > 不打开也能用：整屏面板那一套每次都走回退路径，标注、识别、翻译、插入、复制、另存为的行为完全一样。
 
+   > **前置条件 2（不要提权）：DSH Desktop 必须以普通权限运行。**
+   > 被提权的父进程拉起 Chromium（Edge / Chrome）时，浏览器会走 **AutoDeElevate**：它检测到自己由提权进程启动就立刻退出，让 shell 以普通权限重新启动自己；**命令行偏长时这次中继会把参数丢掉**，于是 kiosk 根本没打开面板 URL。现象：点截图后窗口**闪一下就不见了**、DSH 日志里 `panel files fetched: 0 (none)`，而浏览器自己的日志（插件已开 `--enable-logging`，落在临时 profile 的 `chrome_debug.log`）只有一行 `Edge is running elevated: 1`；上游是 Chromium issue 436869753。
+   > 插件自 t81 起已在 kiosk 旗标里带上游的规避开关 `--do-not-de-elevate`，提权时一般也能正常打开面板 —— 代价是**浏览器会一并留在提权状态**（这是它唯一的副作用），所以**推荐的做法始终是不要提权**。
+   > 特别地，如果 DSH 的 exe 被打了兼容性层 `~ RUNASADMIN`（在 `HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers` 下），提权就是必然的：启动日志会直接点名（`DSH is running with the RUNASADMIN compatibility layer (__COMPAT_LAYER=…)`）。去掉那一层、以普通权限重启 DSH Desktop 即可。
+
 4. 自检清单（安装 + 重启后 30 秒内可做完）：
    - 打开任意普通会话，输入框动作区出现截图按钮，悬停显示"截图 / Screenshot"；
    - 点按钮：DSH 窗口一闪（被临时隐藏后恢复），随后**整个屏幕**被截图面板盖住（含任务栏）。若看到的是"DSH 窗口里出现一张冻结帧"，说明上面那条前置开关还没开（已知回退，不是故障，对照下一条）；
    - 框选一块区域 → 工具栏出现 → 点「复制」→ 面板关闭、回 DSH，出现成功提示；
    - 在面板里按 Esc（或右键、或框太小）→ 面板关闭，DSH 里的草稿文字与附件与进入前完全一致；
    - 把 Edge / Chrome 都临时改名（模拟"没有浏览器"）→ 点截图出现「未找到可用的浏览器…」并**照样能截**（回退 DSH 内覆盖层）。
+   - 点按钮后 kiosk 窗口**闪一下就没有下文**（既没有整屏面板，也没有冻结帧）→ 对照「安装」里的**前置条件 2**：DSH 提权运行时 Chromium 的 AutoDeElevate 会把这次启动整个吞掉，日志里 `panel files fetched: 0 (none)` 且浏览器日志只有 `Edge is running elevated: 1`。
 
 ---
 
@@ -258,8 +264,10 @@ node lib/prune-onnx-runtime.mjs --apply    # 真删：288MB → 65MB（win-x64�
 | 点截图后提示「未找到可用的浏览器（Edge / Chrome）…」 | 机器上没有 Edge/Chrome，或 `overlayBrowserPaths` 指错了：面板无法全屏承载，本次截图自动回退到 DSH 内覆盖层流程 |
 | 点截图后提示「DSH Desktop 挡住了独立截图面板（…403 forbidden）…」 | **这是默认状态，不是故障**：DSH Desktop 的 webServer 默认只放行带渲染器令牌的请求，普通浏览器（kiosk 窗口）访问面板页一律得到 `403` + 正文 `forbidden`（`lib/webserver.js` 的 `permits()` → `decideDesktopBrowserAccess`，`openBrowser` 默认 `false`）。插件在抓屏前预检到这一条，**本次截图已自动回退**到 DSH 内覆盖层流程。想要完整的整屏面板：**设置 → 「浏览器与局域网」→ 勾选「允许在浏览器中打开」**（该开关只在兼容模式下可用），或在当前 profile 的 `cordis.patch.yml` 里给 `desktop-shell` 那行加 `openBrowser: true`，然后**重启 DSH Desktop**。细节见「安装」里的前置开关 |
 | 开关已经开了，点截图却**什么都不出来**，DSH 日志里是 `overlay aborted: no heartbeat for … ms: the kiosk page never pinged (…)` | 闸门已经放行（预检没报 `403`），是**浏览器那一侧没把面板页渲染出来**：kiosk 进程起来了（日志里 `stopped=true killed=false`，不是崩溃），但一次心跳都没发。三个已知原因（t80 都已处理）：① **机器上有系统代理**（`ProxyEnable=1`，`ProxyServer` 指向本机端口；代理本身是死的更明显）——代理替 `127.0.0.1` 作答，面板就成了白屏/错误页，而宿主看不出区别（本机实测：配了死代理时 Edge 打开面板 URL 只拿到一张错误页，加上 `--no-proxy-server` 立刻恢复成真页面）→ kiosk 现在带 `--no-proxy-server`；② 每次会话都用**全新的 `--user-data-dir`**，慢机器冷启动可能超过心跳窗口 → **首次心跳**给 20 s（`OVERLAY_FIRST_PING_MS`）；③ 开关散在 URL 两侧时，哪些开关真正生效取决于浏览器的解析顺序 → 现在**所有开关都排在 URL 之前**，URL 永远是最后一个参数。若仍是这一条，日志里紧接着有三行自诊断，按顺序读：`overlay assets: … MISSING …`（插件目录本身不完整，重装后**重启 DSH Desktop**）、`panel files fetched: 0 (none)`（浏览器**一次都没连到插件服务器**，问题在浏览器到回环地址这一段：代理／策略／根本没打开 URL）、`panel files fetched: 3 (page, asset:overlay.js, lib:geometry.mjs)`（文件都取走了但脚本没跑起来 → 看 `overlay kiosk browser log:` 里浏览器的原话） |
+| 点截图后 kiosk 窗口**闪一下就不见了**，日志里 `panel files fetched: 0 (none)`，而 `overlay kiosk browser log:` 只有一行 `Edge is running elevated: 1` | **DSH Desktop 正在以管理员权限运行**（或它的 exe 被打了 `~ RUNASADMIN` 兼容性层）→ Chromium 的 **AutoDeElevate** 检测到自己由提权进程启动就直接退出、让 shell 以普通权限重启自己，**命令行偏长时这次中继会把参数丢掉**，于是 kiosk 根本没打开面板 URL（上游 Chromium issue 436869753）。注意此时 `stopped=true killed=false` 也不能证明浏览器真的活着。处理：去掉那个兼容性层并以普通权限重启 DSH Desktop；插件自 t81 起已在 kiosk 旗标里带上游的规避开关 `--do-not-de-elevate`，所以提权时一般也能打开面板（代价是浏览器会一并留在提权状态），但**推荐的做法始终是不要提权**。启动日志里的 `DSH is running with the RUNASADMIN compatibility layer (__COMPAT_LAYER=…)` 就是这一条的预告 |
 | 点截图后一直转圈 / 提示"抓屏失败" | 宿主抓屏路由没通。先在浏览器 fetch `/api/dsh-screenshot/capture` 看返回：`404` 表示路由未注册（插件未激活或 `webServer` 服务缺席，看 DSH 日志里 `[dsh-screenshot]` 行）；`502` 表示脚本失败，`message` 里带 `capture.*` 细分码（`capture.script-missing`＝`scriptPath` 指错、`capture.timeout`＝超时、`capture.spawn-failed`＝powershell 找不到） |
 | 点截图后 `502` 且 `message` 含 `capture.timeout` | 单次抓屏超过 `timeoutMs`。先把 `timeoutMs` 调大；若仍超时，手动执行 `npm run capture:probe` 观察耗时（本机实测：脚本自身抓屏 73 ms、含保存 155 ms；Node 拉起进程后端到端约 560 ms） |
+| `502` 且 `message` 里是 `GDI+ 中发生一般性错误`（或任何 `… @ line <n>`） | 抓屏本身成功了，**失败在写盘**（t81）：默认输出目录 `%TEMP%\dsh-screenshot-xn` 可能是**上一次提权运行**创建的，属主是 `BUILTIN\Administrators` 且没有任何给当前用户的 ACE，GDI+ 于是建不了文件；这种目录常常**连删都删不掉**（父目录不给 `DELETE_CHILD`），所以用户无法靠删目录自愈。现在 `capture.ps1` 落盘前先探测可写性（写一个 `.dsh-write-probe-*.tmp` 再删掉），不可写就自动改写到 `%LOCALAPPDATA%\dsh-screenshot-xn`（再不行用 `%TEMP%\dsh-screenshot-xn-<随机>`），本次截图照常成功；用了哪个目录、被拒的原因（含 owner）都在结果的 `out_dir_requested` / `out_dir_writable` / `out_dir_reason` / `out_dir_fallback` 字段里，宿主还会在日志里写一行 `output directory is not writable, the PNG went to <目录>: <原因>` |
 | 面板出现了，但 DSH 窗口仍然出现在画面里 | 宿主没能确认"这是 DSH 的窗口"（pid/映像名/标题三条都对不上）→ 脚本按设计回退为"不隐藏"抓屏，并在界面给出可见提示。检查 `dshPid` / `dshImage` / `dshTitleHint` |
 | 面板卡住不动，或提交后一直没回 DSH | 面板页面每 1 s 发一次心跳。**第一次心跳之前**宿主给 20 s 冷启动窗口（`OVERLAY_FIRST_PING_MS`，t80：每次会话都是全新 `--user-data-dir`，慢机器首绘可能超过常规窗口），之后超过 `overlayHeartbeatMs` 没消息宿主就判 `aborted` 并关掉窗口，DSH 侧给出可见提示（可重试）；会话总上限是 `overlayTimeoutMs`。判 `aborted` 前宿主还会把浏览器自己写的日志尾部（`overlay kiosk browser log:`）与面板文件被取走的记录（`panel files fetched:`）一并写进 DSH 日志 |
 | 面板提交后 DSH 里没有插入 | 插入走官方 paste 桥接（`useInput` 的附件数必须增加才算成功）；桥接不可用时会**真实降级**为"复制到剪贴板 + 提示手动 Ctrl+V"，不会静默。看控制台 `[dsh-screenshot] paste bridge …` 行 |
@@ -267,6 +275,7 @@ node lib/prune-onnx-runtime.mjs --apply    # 真删：288MB → 65MB（win-x64�
 | 坐标对不上（框选区域与粘贴图不一致） | 面板是**整屏 1:1**：页面按"位图尺寸 = 冻结帧像素、CSS 尺寸 = 视口尺寸"绘制，框选坐标即屏幕坐标。若真的出现偏移，先确认抓屏是 DPI-aware（`npm run capture:probe` 输出的 `dpi_awareness` 应含 `=True`，`scale` 应为 1），并附面板控制台的 `[dsh-screenshot] overlay mapping` 日志 |
 | 主题切换后 DSH 内面板看不清 | DSH 内覆盖层只用 `--dsw-alias-*` 令牌；独立面板是**独立窗口**，自绘深色 UI，不依赖 DSH 主题（这是刻意的：独立窗口拿不到 DSH 的 CSS 变量） |
 | 权限/安全软件拦截 PowerShell | 抓屏依赖 `powershell.exe` 启动。企业策略禁用 `-ExecutionPolicy Bypass` 或拦截脚本时，把 `scriptPath` 指到允许的副本，或改用允许的策略重新调用；失败都会以 `502 + capture.failed` 显式报错，不会静默 |
+| 用 git/pnpm 更新插件时报 `Unable to create '…index.lock': Permission denied`，而 cmd / PowerShell / node 写同一路径正常 | 火绒 6.0 一类安全软件会拒绝 **MSYS2 家族可执行文件**（各处自带的 `git.exe`、`touch.exe`、`mkdir.exe`、`bash.exe` 等）对**非系统盘**（D:/E:/F:/G:）的一切写操作，与 ACL、属主无关（提权时正常、C: 盘正常）。处理：把插件目录放在系统盘，或用 zip / 资源管理器**覆盖安装**（不经过 MSYS2 工具链），或在安全软件里给这些可执行文件放行 |
 | 想验证纯逻辑单测 | 在包目录执行 `npm test`（即 `node --test`）。用例完全脱机：不读真实屏幕、不联网、不加载 DSH 运行时 |
 | 识别说"这台机器没有可用的 OCR 语言包" | Windows 的 OCR 引擎要装语言包：`设置 → 时间和语言 → 语言和区域`，给中文/英文加上"可选语言功能 → 光学字符识别"。想看这台机器到底装了哪些，直接跑 `powershell -NoProfile -ExecutionPolicy Bypass -File lib/ocr.ps1 -ListLanguages`；只装了一种也没关系，`ocrLanguage` 留空即用它 |
 | 识别出来是问号/方块 | 那是 PowerShell 的 **stdout 编码**问题，不是识别问题：重定向的管道默认按 OEM 代码页（中文机器上是 936/GBK）写出，宿主按 UTF-8 读。`lib/ocr.ps1` 与 `lib/clipboard.ps1` 顶上已经把 `[Console]::OutputEncoding` 钉成 UTF-8；自己写脚本调用同一批接口时记得照做 |

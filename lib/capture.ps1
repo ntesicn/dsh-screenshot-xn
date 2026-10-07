@@ -30,7 +30,11 @@
 #   png_bytes           integer  size of that PNG in bytes (null when no shot)
 #   elapsed_capture_ms  integer  CopyFromScreen duration (null when no shot)
 #   elapsed_total_ms    integer  CopyFromScreen + PNG encode + verification
-#   out_dir             string   directory the PNG was written to
+#   out_dir             string   directory the PNG was written to (after any fallback)
+#   out_dir_requested   string   directory the caller asked for
+#   out_dir_writable    boolean  whether the requested directory accepts a file (t81)
+#   out_dir_reason      string   why it was rejected (null when writable)
+#   out_dir_fallback    boolean  true when a fallback directory was used instead
 #   tag                 string   file-name tag
 #   powershell          string   reporting engine version
 #   process_id          integer  this process id
@@ -102,6 +106,10 @@ $script:result = [ordered]@{
   elapsed_capture_ms = $null
   elapsed_total_ms   = $null
   out_dir            = $null
+  out_dir_requested  = $null
+  out_dir_writable   = $false
+  out_dir_reason     = $null
+  out_dir_fallback   = $false
   tag                = $Tag
   powershell         = $PSVersionTable.PSVersion.ToString()
   process_id         = $PID
@@ -133,6 +141,42 @@ function Fail {
   param([string]$Message, [int]$Code = 3)
   $script:result['error'] = $Message
   Write-Result -Code $Code
+}
+
+# ------------------------------------------------- output directory checks (t81)
+# GDI+ reports only "a generic error occurred in GDI+" for a directory it cannot
+# write to, which hides the real cause: a directory created while DSH ran elevated
+# can belong to Administrators and carry no ACE for the current user - and that
+# user often cannot even delete it. Probe before saving, and never fail a capture
+# over a directory that cannot be used.
+# Returns $null when the directory accepts a file, otherwise the reason it does not.
+function Test-WritableDirectory {
+  param([string]$Path)
+  $probe = Join-Path $Path ('.dsh-write-probe-{0}.tmp' -f [guid]::NewGuid().ToString('N').Substring(0, 8))
+  # The probe is the only trustworthy answer: New-Item -Force reports nothing at all
+  # for a path it cannot create in Windows PowerShell 5.1 (measured), and an existing
+  # directory can be listed while refusing every write. So: write, then - only if that
+  # failed - create and write again.
+  try {
+    [System.IO.File]::WriteAllText($probe, 'dsh-screenshot-xn write probe')
+    Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    return $null
+  } catch {
+    $first = $_.Exception.Message
+  }
+  try { New-Item -ItemType Directory -Force -Path $Path -ErrorAction SilentlyContinue | Out-Null } catch { }
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return "the directory cannot be created: $first"
+  }
+  try {
+    [System.IO.File]::WriteAllText($probe, 'dsh-screenshot-xn write probe')
+    Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+    return $null
+  } catch {
+    $owner = ''
+    try { $owner = " (owner=$((Get-Acl -LiteralPath $Path).Owner))" } catch { }
+    return "a probe file cannot be written there: $($_.Exception.Message)$owner"
+  }
 }
 
 # --------------------------------------------------------------- window helpers
@@ -353,10 +397,34 @@ public static class DshScreenshotNative {
     Write-Result -Code 0
   }
 
-  $target = $OutDir
-  if ([string]::IsNullOrWhiteSpace($target)) { $target = $env:TEMP }
-  if (-not (Test-Path -LiteralPath $target)) {
-    New-Item -ItemType Directory -Force -Path $target | Out-Null
+  # t81: the caller's directory wins, but only if it really accepts a file. A
+  # leftover directory from an elevated run is the usual trap, so fall back to a
+  # per-user directory (then to a fresh one) instead of letting GDI+ fail later.
+  $requested = $OutDir
+  if ([string]::IsNullOrWhiteSpace($requested)) { $requested = $env:TEMP }
+  $script:result['out_dir_requested'] = $requested
+  $reason = Test-WritableDirectory -Path $requested
+  $target = $null
+  if ($null -eq $reason) {
+    $target = $requested
+    $script:result['out_dir_writable'] = $true
+  } else {
+    $script:result['out_dir_reason'] = $reason
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+      $candidates += (Join-Path $env:LOCALAPPDATA 'dsh-screenshot-xn')
+    }
+    $candidates += (Join-Path $env:TEMP ('dsh-screenshot-xn-' + [guid]::NewGuid().ToString('N').Substring(0, 8)))
+    foreach ($candidate in $candidates) {
+      $candidateReason = Test-WritableDirectory -Path $candidate
+      if ($null -eq $candidateReason) {
+        $target = $candidate
+        $script:result['out_dir_fallback'] = $true
+        break
+      }
+      $script:result['out_dir_reason'] = "$reason; $candidate also failed: $candidateReason"
+    }
+    if ($null -eq $target) { Fail "no writable output directory: $($script:result['out_dir_reason'])" 6 }
   }
   $script:result['out_dir'] = (Resolve-Path -LiteralPath $target).Path
   $stamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
@@ -431,7 +499,15 @@ public static class DshScreenshotNative {
       }
       $script:result['elapsed_capture_ms'] = [int]$copyWatch.ElapsedMilliseconds
       if ($hidden) { $script:result['hidden_ms'] = [int]$hideWatch.ElapsedMilliseconds }
-      $bitmap.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+      try {
+        $bitmap.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+      } catch {
+        # The probe above normally prevents this; if the directory turned
+        # unwritable in between, name the cause instead of GDI+'s generic error.
+        $why = Test-WritableDirectory -Path $target
+        if ($null -ne $why) { throw "cannot write the PNG into $target - $why" }
+        throw
+      }
     } finally {
       $bitmap.Dispose()
     }

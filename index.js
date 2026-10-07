@@ -263,6 +263,13 @@ export const OVERLAY_KIOSK_FLAGS = Object.freeze([
   // 机器上装了系统代理时（WinINET `ProxyEnable=1`），代理会替 127.0.0.1 作答，面板就变成
   // 白屏或错误页 —— 宿主这边只表现为"没有心跳"，看不出真实原因。
   '--no-proxy-server',
+  // t81：DSH 自己以管理员权限运行时（exe 上打了 AppCompatFlags 的 `~ RUNASADMIN`，或从提权终端
+  // 启动），Chromium 的 AutoDeElevate 会检测到"父进程提权"，于是**退出**、改由 shell 以普通权限
+  // 重新拉起自己 —— 命令行偏长时这次中继会把参数丢掉，浏览器于是根本不会打开面板 URL。现象是
+  // kiosk 进程几秒内 exit 0、零心跳、`panel files fetched: 0`，kiosk 日志只剩一行
+  // `Edge is running elevated: 1`。这条开关让浏览器原地继续（上游 issue 436869753 的规避方式）；
+  // 不认识它的浏览器会忽略未知开关，不会造成回归。
+  '--do-not-de-elevate',
 ]);
 
 /** Failure carrying a short machine-readable detail code for the log line. */
@@ -1685,6 +1692,11 @@ function createOverlayHost(ctx, settings, webServer, capture, modeBridge = undef
       log(ctx, 'warn', `overlay kiosk browser log is empty (${file})`);
       return;
     }
+    // t81：先给结论再看原始行 —— 二十行 Chromium 噪音会把结论埋掉。浏览器自述"我在提权状态下
+    // 运行"时，面板打不开几乎总是 AutoDeElevate 把参数丢了（见 OVERLAY_KIOSK_FLAGS）。
+    if (lines.some((line) => /running elevated:\s*1/u.test(line))) {
+      log(ctx, 'warn', 'overlay kiosk: the browser reported it was started elevated (Chromium AutoDeElevate); if the panel never navigated, run DSH without administrator rights (the kiosk flags already carry --do-not-de-elevate for this case)');
+    }
     const tail = lines.slice(-OVERLAY_KIOSK_LOG_LINES);
     log(ctx, 'warn', `overlay kiosk browser log: last ${String(tail.length)} of ${String(lines.length)} lines from ${file}`);
     for (const line of tail) log(ctx, 'warn', `  kiosk> ${line.length > 300 ? `${line.slice(0, 300)}…` : line}`);
@@ -2204,6 +2216,11 @@ function reportOverlayAssets(ctx, overlay) {
     const mark = (file) => (existsSync(file) ? 'ok' : 'MISSING');
     log(ctx, 'info', `overlay assets: page ${mark(page)} ${page}, script ${mark(script)} ${script}, style ${mark(style)} ${style}, lib ${modules < 0 ? 'MISSING' : `${String(modules)} modules`} ${libDir}`);
     log(ctx, 'info', `overlay kiosk flags: ${OVERLAY_KIOSK_FLAGS.join(' ')} + --enable-logging --log-file=<profile>/${OVERLAY_KIOSK_LOG_NAME} --user-data-dir=<profile>`);
+    // t81：`~ RUNASADMIN` 兼容性层会把它写进进程环境，所以这是零成本、非推断的提权自述。
+    const layer = process.env.__COMPAT_LAYER;
+    if (typeof layer === 'string' && /runasadmin/iu.test(layer)) {
+      log(ctx, 'warn', `DSH is running with the RUNASADMIN compatibility layer (__COMPAT_LAYER=${layer}): a browser started from an elevated process relaunches itself through the shell and can lose its arguments, which is why the kiosk flags carry --do-not-de-elevate (t81)`);
+    }
   } catch (error) {
     log(ctx, 'warn', `overlay asset report failed: ${message(error)}`);
   }
@@ -2392,6 +2409,11 @@ async function captureOnce(ctx, settings, viewportCss, mode = MODE_NORMAL) {
     // Nothing was hidden: the caller falls back to an ordinary frame and the
     // descriptor says `mode: normal`, so the Client half can tell the user.
     log(ctx, 'warn', `through capture skipped: ${text(parsed.through_reason) ?? 'the DSH window could not be confirmed'}`);
+  }
+  if (parsed.out_dir_writable === false) {
+    // t81：输出目录不可写时 GDI+ 只报"GDI+ 中发生一般性错误。"，看不出是权限问题。抓屏脚本
+    // 会先探测、再退到可写目录，所以这里只说明这一次的 PNG 落在了哪里。
+    log(ctx, 'warn', `output directory is not writable, the PNG went to ${text(parsed.out_dir) ?? 'a fallback directory'}: ${text(parsed.out_dir_reason) ?? 'unknown reason'}`);
   }
   return { bytes, info: describe(parsed, bytes.length, Date.now() - startedAt, viewportCss, mode) };
 }
