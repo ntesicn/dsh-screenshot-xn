@@ -30,12 +30,13 @@
 </table>
 
 > **插件名**：`dsh-screenshot-xn`（2026-09-30 由 `dsh-screenshot` 改名，用于和市面上同名/近名的截屏插件区分）。
-> 目录仍是 `E:\dshplugins\dsh-screenshot`；改的只是**包名与 cordis 行 id/name**（插件列表与插件页显示的就是它）。
+> 目录（改名当天）仍是 `E:\dshplugins\dsh-screenshot`；改的只是**包名与 cordis 行 id/name**（插件列表与插件页显示的就是它）。
+> **2026-10-11：仓库目录迁到 `E:\dsh-screenshot-xn\dsh-screenshot`**（与仓库名对齐，老路径 `E:\dshplugins\dsh-screenshot` 作废）。目录一搬，profile 里那条 `link:` 就指向了不存在的路径 —— 在 **DSH Desktop 2.0.17** 上这是**启动级**故障（整个应用起不来），不是「插件不生效」：见「故障排查」第一行。
 > **保持不变**（都是冻结契约，改名不碰）：路由 `/api/dsh-screenshot/*`、度量头 `X-DSH-Screenshot`、
 > 槽位条目 id `dsh-screenshot.button` / `dsh-screenshot.overlay`、DOM 标记 `data-dsh-screenshot-ui`。
 > 同名迁移已做：活动 profile 的注册（依赖键 / bundles / 行 id+name）、`captureMode` 持久化覆盖、node_modules 链接。
 
-- 代码产地：`E:\dshplugins\dsh-screenshot`
+- 代码产地：`E:\dsh-screenshot-xn\dsh-screenshot`（2026-10-11 起；此前为 `E:\dshplugins\dsh-screenshot`）
 - 运行时：DSH Desktop（Windows）。宿主半依赖 Windows PowerShell 5.1 + .NET `System.Drawing`（系统自带，无第三方原生依赖）；独立面板用系统浏览器（Edge / Chrome）的 kiosk 窗口承载；客户端半是纯浏览器代码。
 - 验证过的版本：**DSH 0.1.7-rc.2**、活动 profile `comfyui`、node v24.14.1、Windows PowerShell 5.1.26100.9444（R-06：DSH 升级后请重新目视核对槽位与路由）。
 
@@ -52,10 +53,12 @@
    ```
    plugin_manager
      action: install_bundle
-     target: E:\dshplugins\dsh-screenshot
+     target: E:\dsh-screenshot-xn\dsh-screenshot
    ```
 
    该动作会调用 pnpm 把本地目录装进活动 profile，并按 `package.json` 的 `dsh.bundle.patch` 应用 `cordis.patch.yml`。
+   `target` 就是本仓库当前所在的绝对路径（上面是这台开发机上的路径；**换机器 / 搬目录请换成你自己的**）。装完后 profile 的 `package.json` 里会留下一条 `"dsh-screenshot-xn": "link:<该路径>"`，`<profile>/node_modules/dsh-screenshot-xn` 也指向同一目录。
+   **这两处任意一处指向不存在的路径，DSH Desktop 2.0.17 就拒绝启动**（症状与修法见「故障排查」第一行）。
 
 2. **需要批准**：安装动作（以及可能的构建脚本）会请求用户批准；未批准时安装不会生效。若返回体里出现 `pendingBuilds`，本插件不需要任何构建脚本，不要为它授权。
 
@@ -258,6 +261,7 @@ node lib/prune-onnx-runtime.mjs --apply    # 真删：288MB → 65MB（win-x64�
 
 | 现象 | 原因与处理 |
 | --- | --- |
+| **DSH Desktop 升级到 2.0.17 后整个应用起不来**（窗口一闪就没、或只有一个空白页/错误框），日志里是 `dsh-plugin-desktop: cannot resolve package "dsh-screenshot-xn" from the Desktop installation or active Profile`（错误名 `PackageOverlayNotFoundError`） | **profile 里本插件那条 `link:` 指向了不存在的路径**（典型场景：仓库目录被搬走或改名，见开头的「2026-10-11 迁目录」）。2.0.17 在启动时会拿 profile 的**每一行 bundle** 走 `resolveOverlayPackage`（`lib/profile-*.js` 的 `loadRecoveryFilteredProfile` → `lib/package-overlay-*.js`），解析不到就抛错并**拒绝启动**；2.0.15 及更早只是把这一行当「缺失」跳过，所以这是**升级到 2.0.17 之后**才显形的。**处理（任选其一）**：① 官方路径：`plugin_manager` → `action: install_bundle`、`target: E:\dsh-screenshot-xn\dsh-screenshot`，它会把这条链接重写到当前路径；② 手工路径：改 profile 的 `package.json`，让 `"dsh-screenshot-xn": "link:<本仓库绝对路径>"` 指向真实目录，并让 `<profile>/node_modules/dsh-screenshot-xn` 指向同一目录（junction 或 symlink 都行，必须是**目录链接**而不是拷贝）。**起不来时的应急通道**：把 `dsh-screenshot-xn` 从 profile 的 `dsh.profile.bundles` 里去掉（＝桌面端把插件「停用」），DSH 立刻能起，之后再按上面修好加回来。**自检（不必重启）**：`node -e "const{createRequire}=require('module');console.log(createRequire('<profile>/package.json').resolve('dsh-screenshot-xn/package.json'))"` 能打印出路径即已修好；2.0.17 只认**落在 `<profile>/node_modules` 里**的那份解析结果（`lib/package-overlay-*.js` 里那条偏移检查），所以别把 `link:` 指到 profile 之外的祖先 `node_modules`、指望它兜底 |
 | 输入框旁没有截图按钮 | ① 插件未激活：确认 `install_bundle` 返回 `application: applied`，否则重启一次；② 客户端 bundle 未加载：打开开发者工具看是否有 `bundle ... loaded without registering "dsh-screenshot"`；③ 槽位：本插件当前只注册 `conversation.input.right`（若该槽在 composer 变体下不渲染，保底方案是改注册 `conversation.composer.dock`，按钮会移到输入卡片下方，见"局限"） |
 | 点截图后**全屏被一层白/灰底挡住，只看得见一行"拖动鼠标框选"和一个输入框** | 面板页的 **CSS/JS 没加载成功**（没样式化的骨架）。原因（t64 已修）：宿主把 token 校验放在静态资源分支之前，而页面的 `<link>`、`<script>` 与静态 `import '…/overlay/lib/x.mjs'` 都不带 token → 三族全 404、脚本一行不跑、没有心跳、5 s 后会话 `aborted`。**修好后必须重启 DSH Desktop**（宿主半只在进程启动时加载）；页面自带启动看门狗，再遇到这种情况会在屏幕顶部显示红色横幅（含自身 URL），宿主日志里也会有 `overlay static file missing:` 行 |
 | 点截图后提示「独立截图面板不可用…（overlay.start http 404）」 | 宿主半还是旧版（没有 overlay 路由）：**重启 DSH Desktop**。本次截图已经自动回退到 DSH 内覆盖层流程，功能不缺失 |
@@ -354,7 +358,7 @@ node lib/prune-onnx-runtime.mjs --apply    # 真删：288MB → 65MB（win-x64�
 ## 开发与验证
 
 ```
-cd E:\dshplugins\dsh-screenshot
+cd E:\dsh-screenshot-xn\dsh-screenshot
 npm test                                  # 脱机纯逻辑单测（node --test）
 node tests/overlay-e2e.mjs                # B1 端到端复跑（真实宿主路由 + 真实客户端编排，替身窗口）
 node tests/overlay-browser-probe.mjs      # 真浏览器探测（headless Edge/Chrome + CDP：页面能否取帧画布、心跳能否续命）
@@ -362,7 +366,7 @@ node tests/ocr-browser-probe.mjs          # t75 端到端：真浏览器面板 �
 node tests/negative-asset-order.mjs       # 负样本：把静态资源顺序打回原形，验证门禁真的会失败
 npm run capture:probe                     # 手动跑一次抓屏脚本，打印 JSON 结果
 node --check index.js && node --check client.js   # 两半语法检查
-cd E:\dshplugins; node validate.mjs E:\dshplugins\dsh-screenshot   # 交付物契约自检（A-1..A-6 / D-11 + X-1/X-2/X-3）
+cd E:\dsh-screenshot-xn; node validate.mjs E:\dsh-screenshot-xn\dsh-screenshot   # 交付物契约自检（A-1..A-6 / D-11 + X-1/X-2/X-3）
 npm pack --dry-run                        # 发布清单（files 白名单：index/client/lib/overlay/locale/icon/patch/README）
 ```
 

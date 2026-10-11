@@ -30,12 +30,13 @@ All three below are real-machine shots (this machine's 3440×1440 primary screen
 </table>
 
 > **Plugin name**: `dsh-screenshot-xn` (renamed from `dsh-screenshot` on 2026-09-30, to distinguish it from screenshot plugins with the same or a similar name on the market).
-> The directory is still `E:\dshplugins\dsh-screenshot`; the only things changed are the **package name and the cordis row id/name** (which is what the plugin list and plugin page display).
+> The directory (on the day of the rename) was still `E:\dshplugins\dsh-screenshot`; the only things changed were the **package name and the cordis row id/name** (which is what the plugin list and plugin page display).
+> **2026-10-11: the checkout moved to `E:\dsh-screenshot-xn\dsh-screenshot`** (to match the repository name; the old path `E:\dshplugins\dsh-screenshot` is retired). Moving it retargets nothing: the profile still holds a `link:` to a path that no longer exists, and on **DSH Desktop 2.0.17** that is a **startup-level** failure (the whole app refuses to start), not a plugin that merely does not work - see the first row of "Troubleshooting".
 > **Unchanged** (all frozen contracts, untouched by the rename): the route `/api/dsh-screenshot/*`, the metrics header `X-DSH-Screenshot`,
 > the slot entry ids `dsh-screenshot.button` / `dsh-screenshot.overlay`, and the DOM marker `data-dsh-screenshot-ui`.
 > The same-name migration has been done: registration in the active profile (dependency key / bundles / row id+name), the persisted `captureMode` override, and the node_modules links.
 
-- Code origin: `E:\dshplugins\dsh-screenshot`
+- Code origin: `E:\dsh-screenshot-xn\dsh-screenshot` (since 2026-10-11; before that `E:\dshplugins\dsh-screenshot`)
 - Runtime: DSH Desktop (Windows). The host half depends on Windows PowerShell 5.1 + .NET `System.Drawing` (both built into the system, no third-party native dependencies); the independent panel is hosted by a kiosk window of the system browser (Edge / Chrome); the client half is pure browser code.
 - Verified versions: **DSH 0.1.7-rc.2**, active profile `comfyui`, node v24.14.1, Windows PowerShell 5.1.26100.9444 (R-06: after upgrading DSH, re-verify the slots and routes visually).
 
@@ -52,10 +53,12 @@ Installation is handled by the official `plugin_manager` tool; **do not** hand-w
    ```
    plugin_manager
      action: install_bundle
-     target: E:\dshplugins\dsh-screenshot
+     target: E:\dsh-screenshot-xn\dsh-screenshot
    ```
 
    That action calls pnpm to install the local directory into the active profile, and applies `cordis.patch.yml` according to `package.json`'s `dsh.bundle.patch`.
+   `target` is the absolute path where this checkout currently lives (the path above is this development machine; **on another machine or after a move, use your own**). The install leaves `"dsh-screenshot-xn": "link:<that path>"` in the profile `package.json`, and `<profile>/node_modules/dsh-screenshot-xn` points at the same directory.
+   **If either of those two points at a path that does not exist, DSH Desktop 2.0.17 refuses to start** (symptom and fix: the first row of "Troubleshooting").
 
 2. **Approval is required**: the install action (and possibly build scripts) will ask the user for approval; the installation does not take effect without approval. If `pendingBuilds` shows up in the response body, this plugin needs no build scripts at all — do not authorize any for it.
 
@@ -251,6 +254,7 @@ Leftover check: after uninstalling, `%TEMP%\dsh-screenshot-xn` holds at most the
 
 | Symptom | Cause and handling |
 | --- | --- |
+| **The whole app refuses to start after DSH Desktop is upgraded to 2.0.17** (the window flashes and disappears, or nothing but a blank page appears), and the log says `dsh-plugin-desktop: cannot resolve package "dsh-screenshot-xn" from the Desktop installation or active Profile` (error name `PackageOverlayNotFoundError`) | **The `link:` entry for this plugin in the profile points at a path that no longer exists** (the classic case: the checkout directory was moved or renamed - see the "2026-10-11 directory move" note at the top). At startup 2.0.17 runs `resolveOverlayPackage` over **every bundle row** of the profile (`loadRecoveryFilteredProfile` in `lib/profile-*.js` -> `lib/package-overlay-*.js`) and **refuses to start** when one cannot be resolved; 2.0.15 and earlier merely treated such a row as missing, which is why this shows up only **after the upgrade to 2.0.17**. Handling (either one): ① the official route - `plugin_manager` -> `action: install_bundle`, `target: E:\dsh-screenshot-xn\dsh-screenshot`, which rewrites the link to the current path; ② by hand - edit the profile `package.json` so `"dsh-screenshot-xn": "link:<absolute path of this checkout>"` names the real directory, and make `<profile>/node_modules/dsh-screenshot-xn` point at the same directory (a junction or a symlink, a **directory link** rather than a copy). Emergency channel while it will not start: drop `dsh-screenshot-xn` from the profile `dsh.profile.bundles` (= "disable" in the Desktop UI); DSH starts again, and you can repair the link and add it back. Self-check without restarting: `node -e "const{createRequire}=require('module');console.log(createRequire('<profile>/package.json').resolve('dsh-screenshot-xn/package.json'))"` printing a path means it is fixed; 2.0.17 accepts only a resolution that lands **inside `<profile>/node_modules`** (the offset check in `lib/package-overlay-*.js`), so do not point `link:` at an ancestor `node_modules` outside the profile and expect it to be the fallback |
 | No screenshot button next to the input box | ① The plugin is not activated: confirm that `install_bundle` returned `application: applied`, otherwise restart once; ② the client bundle is not loaded: open the developer tools and look for `bundle ... loaded without registering "dsh-screenshot"`; ③ the slot: this plugin currently registers only `conversation.input.right` (if that slot does not render under some composer variant, the fallback is to register `conversation.composer.dock` instead, which moves the button below the input card — see "Limitations") |
 | After clicking the screenshot button, **the whole screen is covered by a white/grey background, with only a line "drag the mouse to select" and one input box visible** | The panel page's **CSS/JS did not load** (an unstyled skeleton). Cause (fixed in t64): the host put token validation before the static asset branch, while the page's `<link>`, `<script>` and static `import '…/overlay/lib/x.mjs'` all carry no token → all three families 404, not a single line of script runs, there is no heartbeat, and the session goes `aborted` after 5 s. **After fixing it you must restart DSH Desktop** (the host half is only loaded at process start); the page has its own startup watchdog, so if this happens again it shows a red banner at the top of the screen (containing its own URL), and the host log gains an `overlay static file missing:` line |
 | After clicking the screenshot button, 「独立截图面板不可用…（overlay.start http 404）」 appears | The host half is still an old version (without the overlay routes): **restart DSH Desktop**. This capture has already automatically fallen back to the in-DSH overlay flow, so no functionality is missing |
@@ -346,7 +350,7 @@ Leftover check: after uninstalling, `%TEMP%\dsh-screenshot-xn` holds at most the
 ## Development and verification
 
 ```
-cd E:\dshplugins\dsh-screenshot
+cd E:\dsh-screenshot-xn\dsh-screenshot
 npm test                                  # offline pure-logic unit tests (node --test)
 node tests/overlay-e2e.mjs                # B1 end-to-end rerun (real host routes + real client orchestration, stand-in window)
 node tests/overlay-browser-probe.mjs      # real-browser probe (headless Edge/Chrome + CDP: can the page get the frame canvas, can the heartbeat keep it alive)
@@ -354,7 +358,7 @@ node tests/ocr-browser-probe.mjs          # t75 end to end: real browser panel �
 node tests/negative-asset-order.mjs       # negative sample: put the static asset order back the way it was, to verify the gate really fails
 npm run capture:probe                     # manually run the capture script once and print the JSON result
 node --check index.js && node --check client.js   # syntax check for both halves
-cd E:\dshplugins; node validate.mjs E:\dshplugins\dsh-screenshot   # deliverable contract self-check (A-1..A-6 / D-11 + X-1/X-2/X-3)
+cd E:\dsh-screenshot-xn; node validate.mjs E:\dsh-screenshot-xn\dsh-screenshot   # deliverable contract self-check (A-1..A-6 / D-11 + X-1/X-2/X-3)
 npm pack --dry-run                        # publish manifest (files whitelist: index/client/lib/overlay/locale/icon/patch/README)
 ```
 

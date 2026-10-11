@@ -74,13 +74,13 @@ tarball: https://github.com/ntesicn/dsh-screenshot-xn/releases/latest/download/d
 ## 本地自检
 
 ```sh
-node E:/dshplugins/.market/validate.cjs
+node E:/dsh-screenshot-xn/.market/validate.cjs
 ```
 
 校验条目键名合法、`en`/`zh` 均以句号结尾、`category` 在白名单、`tarball` 匹配
 `^https://github\.com/.+/releases/(?:latest/)?download/.+\.tgz$`（两种合法形态：钉版
 `download/v1.2.0/name-1.2.0.tgz` 与稳定名 `latest/download/name.tgz`，见 `contributing.md:116-128`；
-用 `js-yaml` 解析 `E:/dshplugins/.market/ntesicn__dsh-screenshot-xn.yml`）。
+用 `js-yaml` 解析 `E:/dsh-screenshot-xn/.market/ntesicn__dsh-screenshot-xn.yml`）。
 
 ## CI
 
