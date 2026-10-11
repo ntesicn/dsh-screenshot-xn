@@ -101,7 +101,7 @@ CI 绿灯只是前置条件；维护者会读源码核对描述与分类，并�
 | 项 | 状态 |
 | --- | --- |
 | 公开仓库 | ✅ <https://github.com/ntesicn/dsh-screenshot-xn>（`main`，`dsh.bundle` + `cordis.patch.yml` 就位） |
-| 预构建 Release | ✅ <https://github.com/ntesicn/dsh-screenshot-xn/releases/tag/v1.1.0>（资产 `dsh-screenshot-xn-1.1.0.tgz` 387680 字节 / 34 个文件，外加稳定名 `dsh-screenshot-xn.tgz`；`v1.0.1`、`v1.0.0` 亦在） |
+| 预构建 Release | ✅ <https://github.com/ntesicn/dsh-screenshot-xn/releases/tag/v1.1.1>（资产 `dsh-screenshot-xn-1.1.1.tgz` 389453 字节 / 34 个文件，外加稳定名 `dsh-screenshot-xn.tgz`；`v1.1.0`、`v1.0.1`、`v1.0.0` 亦在） |
 | 市场截图 | ✅ `screenshots.json` + `assets/shot-*.png` |
 | 提 PR 收录 | ✅ PR #6538 已开，等维护者 review / 合并 |
 | npm 发布 | ⬜ 需要在能访问 npm 的网络/终端里 `npm adduser`（见下），然后 `npm publish` |
@@ -142,7 +142,7 @@ CI 绿灯只是前置条件；维护者会读源码核对描述与分类，并�
 ## 本地打包
 
 ```sh
-npm pack --pack-destination ../dist     # 1.1.0 实测：387680 字节 / 34 个文件（1.0.1 是 33 个 / 287776 字节）
+npm pack --pack-destination ../dist     # 1.1.1 实测：389453 字节 / 34 个文件（1.1.0 是 387680 字节，1.0.1 是 33 个 / 287776 字节）
 ```
 
 包里**不含** ONNX 模型与 `node_modules`：模型在首次使用 OCR 时按需下载并校验 SHA256（`lib/ocr-models.mjs`）。
